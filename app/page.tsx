@@ -59,7 +59,7 @@ export default function HomeLauncher() {
               </div>
               <h3 className="text-xl font-semibold text-slate-800 mb-3 tracking-tight">Stage Screen</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                The grand theater view designed for the main dinner projector. Listens to Firestore state events in real time to trigger seamless, cinematic full-screen videos and dynamic subtitles.
+                The grand theater view designed for the main dinner projector. Listens to the local Next.js API session state in real time to trigger seamless, cinematic full-screen videos and dynamic subtitles.
               </p>
             </div>
 

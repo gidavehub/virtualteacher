@@ -51,16 +51,52 @@ export default function StageProjection() {
   // Monitor video mappings based on active segment
   const getVideoSrc = (segmentId: string) => {
     switch (segmentId) {
+      case "walk_in":
+        return "/media/rohey-walk-in.mp4";
       case "welcome":
         return "/media/rohey-hello.mp4";
-      case "giga":
+      case "breaks_heart":
+        return "/media/rohey-breaks-heart.mp4";
+      case "redesign_question":
+        return "/media/rohey-question.mp4";
+      case "listening":
+        return "/media/rohey-listening.mp4";
+      case "pointing_left":
+        return "/media/rohey-pointing-left.mp4";
+      case "pointing_center":
+        return "/media/rohey-looking-center.mp4";
+      case "pointing_right":
+        return "/media/rohey-pointing-right.mp4";
+      case "interactive_feedback":
+        return "/media/rohey-feedback.mp4";
+      case "giga_story":
         return "/media/rohey-giga.mp4";
-      case "feedback":
+      case "gambia_mapping":
+        return "/media/rohey-gambia.mp4";
+      case "classroom_transformed":
         return "/media/connected-classroom.mp4";
-      case "closing":
+      case "turning_point":
+        return "/media/rohey-turning-point.mp4";
+      case "final_commitment":
+        return "/media/rohey-commitment.mp4";
+      case "class_dismissed":
         return "/media/rohey-closing.mp4";
       default:
-        return "/media/rohey-hello.mp4";
+        return "/media/rohey-listening.mp4";
+    }
+  };
+
+  // Standby gesture video loops based on active gesture
+  const getStandbySrc = (gesture: string) => {
+    switch (gesture) {
+      case "left":
+        return "/media/rohey-pointing-left.mp4";
+      case "right":
+        return "/media/rohey-pointing-right.mp4";
+      case "center":
+        return "/media/rohey-looking-center.mp4";
+      default:
+        return "/media/rohey-listening.mp4";
     }
   };
 
@@ -99,6 +135,11 @@ export default function StageProjection() {
       }
 
       if (standbyVid) {
+        const targetStandbySrc = getStandbySrc(session.gesture);
+        if (!standbyVid.src.endsWith(targetStandbySrc)) {
+          standbyVid.src = targetStandbySrc;
+          standbyVid.load();
+        }
         standbyVid.muted = true; // Standby is always silent nodding
         if (session.isPlaying) {
           standbyVid.play().catch((err) => console.log("Play blocked:", err));
@@ -199,7 +240,6 @@ export default function StageProjection() {
         {/* Buffer B: Standby Node Nodding Loop */}
         <video
           ref={standbyVideoRef}
-          src="/media/rohey-listening.mp4"
           className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
             session?.mode === "avatar" ? "opacity-100 z-10" : "opacity-0 z-0"
           }`}
@@ -209,13 +249,24 @@ export default function StageProjection() {
         />
       </div>
 
+      {/* ── FULLSCREEN STATIC IMAGE OVERLAY / FALLBACK FOR GIGA_MAP_VIEW & BREAKS_HEART ── */}
+      {(session?.currentSegmentId === "giga_map_view" || session?.currentSegmentId === "breaks_heart") && (
+        <div className="absolute inset-0 z-20 bg-slate-950 flex items-center justify-center p-8 transition-all duration-1000 animate-scale-up">
+          <img
+            src="/media/giga-gambia-map.jpg"
+            alt="UNICEF Giga Gambia Map"
+            className="w-full h-full object-contain rounded-2xl animate-pulse-slow max-w-7xl shadow-2xl"
+          />
+        </div>
+      )}
+
       {/* ── SIDE-SLIDE HIGH-RESOLUTION VISUAL OVERLAYS ── */}
       {session && session.activeVisual && session.activeVisual !== "none" && (
         <div className="absolute top-10 bottom-10 right-10 w-[42%] z-30 rounded-3xl overflow-hidden border border-white/[0.08] bg-black/65 backdrop-blur-xl shadow-2xl animate-fade-in-right flex flex-col items-center justify-center p-6">
           <div className="relative w-full h-full rounded-2xl overflow-hidden">
             {session.activeVisual === "map" && (
               <img
-                src="/media/giga-gambia-map.png"
+                src="/media/giga-gambia-map.jpg"
                 alt="UNICEF Giga Map"
                 className="w-full h-full object-contain animate-scale-up"
               />
@@ -296,6 +347,14 @@ export default function StageProjection() {
         }
         .animate-scale-up {
           animation: scaleUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes pulseSlow {
+          0%, 100% { opacity: 0.90; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.02); }
+        }
+        .animate-pulse-slow {
+          animation: pulseSlow 5s ease-in-out infinite;
         }
       ` }} />
 
