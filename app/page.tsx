@@ -93,9 +93,6 @@ export default function HomeLauncher() {
           />
           <div className="leading-tight">
             <span className="block text-[14px] font-bold tracking-tight text-ink-deep">
-              DaveLabs
-            </span>
-            <span className="block text-[9px] font-mono tracking-[0.3em] font-semibold text-ink-mute uppercase">
               Virtual Teacher
             </span>
           </div>

@@ -209,8 +209,7 @@ export default function StageProjection() {
               className="object-contain"
             />
             <div className="leading-tight">
-              <span className="block text-[12px] font-bold text-ink-deep">DaveLabs</span>
-              <span className="block text-[8px] font-mono tracking-[0.2em] text-ink-mute uppercase font-bold">Virtual Teacher</span>
+              <span className="block text-[12px] font-bold text-ink-deep">Virtual Teacher</span>
             </div>
           </div>
 

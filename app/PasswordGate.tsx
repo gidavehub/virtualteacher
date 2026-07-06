@@ -125,9 +125,6 @@ export default function PasswordGate({ onUnlock }: PasswordGateProps) {
           />
           <div className="leading-tight">
             <div className="font-sans text-[14px] font-bold tracking-tight text-ink-deep">
-              DaveLabs
-            </div>
-            <div className="font-mono text-[9px] font-bold uppercase tracking-[0.3em] text-ink-mute">
               Virtual Teacher
             </div>
           </div>

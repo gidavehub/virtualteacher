@@ -20,6 +20,9 @@ const caveat = Caveat({
 export const metadata: Metadata = {
   title: "Virtual Teacher Rohey | Production Planner & Operator Dashboard",
   description: "The complete interactive event plan, production script, and live operator control panel for Rohey—The AI Virtual Teacher for UNICEF Gambia, designed and engineered by Kids Edutainment Labs.",
+  icons: {
+    icon: "/davelabstabicon.png"
+  }
 };
 
 export default function RootLayout({

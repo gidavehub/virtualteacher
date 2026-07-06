@@ -240,8 +240,7 @@ export default function OperatorConsole() {
               className="object-contain"
             />
             <div className="leading-tight">
-              <span className="block text-[14px] font-bold text-ink-deep">DaveLabs</span>
-              <span className="block text-[9px] font-mono tracking-[0.3em] text-ink-mute uppercase font-bold">Virtual Teacher</span>
+              <span className="block text-[14px] font-bold text-ink-deep">Virtual Teacher</span>
             </div>
           </div>
           <Link href="/" className="inline-flex items-center gap-1.5 text-xs text-ink-mute hover:text-ink-deep transition-colors font-mono uppercase tracking-wider font-bold">
