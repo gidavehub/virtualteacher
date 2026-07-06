@@ -18,11 +18,50 @@ const caveat = Caveat({
 });
 
 export const metadata: Metadata = {
-  title: "Virtual Teacher Rohey | Production Planner & Operator Dashboard",
-  description: "The complete interactive event plan, production script, and live operator control panel for Rohey—The AI Virtual Teacher for UNICEF Gambia, designed and engineered by Kids Edutainment Labs.",
+  metadataBase: new URL("https://vtp.davelabs.co"),
+  title: "Virtual Teacher | Rohey — Live AI Classroom",
+  description:
+    "Real-time stage projection and operator console for Rohey, the AI Virtual Teacher presented at the UNICEF Gambia dinner in support of the Giga school-connectivity initiative. Built by DaveLabs with Kids Edutainment Labs.",
+  applicationName: "Virtual Teacher",
+  authors: [{ name: "DaveLabs", url: "https://vtp.davelabs.co" }],
+  creator: "DaveLabs",
+  publisher: "Kids Edutainment Labs",
+  keywords: [
+    "Virtual Teacher",
+    "Rohey",
+    "AI avatar",
+    "UNICEF Gambia",
+    "Giga initiative",
+    "school connectivity",
+    "DaveLabs",
+    "Kids Edutainment Labs",
+  ],
+  openGraph: {
+    type: "website",
+    url: "https://vtp.davelabs.co",
+    siteName: "Virtual Teacher",
+    title: "Virtual Teacher | Rohey — Live AI Classroom",
+    description:
+      "Rohey, the AI Virtual Teacher for the UNICEF Gambia dinner — live stage projection and operator console in support of the Giga school-connectivity initiative.",
+    images: [
+      {
+        url: "/media/rohey-avatar.jpg",
+        width: 2560,
+        height: 1428,
+        alt: "Rohey, the AI Virtual Teacher, in her Gambian classroom",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Virtual Teacher | Rohey — Live AI Classroom",
+    description:
+      "Rohey, the AI Virtual Teacher for the UNICEF Gambia dinner — live stage projection and operator console in support of the Giga school-connectivity initiative.",
+    images: ["/media/rohey-avatar.jpg"],
+  },
   icons: {
-    icon: "/davelabstabicon.png"
-  }
+    icon: "/davelabstabicon.png",
+  },
 };
 
 export default function RootLayout({
