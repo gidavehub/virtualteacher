@@ -4,17 +4,21 @@ import path from "path";
 
 const STATE_FILE_PATH = path.join(process.cwd(), "session-state.json");
 
+// The operator writes this "stage directive"; the stage renders it verbatim.
 const DEFAULT_STATE = {
-  currentSegmentId: "welcome",
-  mode: "video",
-  gesture: "none",
-  subtitles: "Good evening, class. Welcome to my classroom...",
-  isPlaying: false,
-  activeVisual: "none",
+  started: false, // has the show been started?
+  mode: "idle" as "idle" | "segment" | "freeze",
+  stepIndex: 0,
+  mainClip: null as number | null, // audio-bearing script clip
+  overlayClip: null as number | null, // silent action clip layered on top
+  audioDelayMs: 0, // delay before the main/audio starts
+  endAlign: false, // delay the shorter of main/overlay so both clips end together
+  caption: "",
+  token: 0, // bump to force the stage to (re)play
+  paused: false, // has the show been paused?
   updatedAt: Date.now(),
 };
 
-// In-memory fallback if file system write/read fails
 let inMemoryState = { ...DEFAULT_STATE };
 
 function readLocalState() {
@@ -43,8 +47,7 @@ function writeLocalState(state: any) {
 
 export async function GET() {
   try {
-    const currentState = readLocalState();
-    return NextResponse.json(currentState);
+    return NextResponse.json(readLocalState());
   } catch (error: any) {
     console.error("Error in GET /api/session:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -55,15 +58,12 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const currentState = readLocalState();
-
     const updatedState = {
       ...currentState,
       ...body,
       updatedAt: Date.now(),
     };
-
     writeLocalState(updatedState);
-
     return NextResponse.json({ success: true, state: updatedState });
   } catch (error: any) {
     console.error("Error in POST /api/session:", error);

@@ -43,3 +43,13 @@ next-env.d.ts
 # local session state
 session-state.json
 
+# video cache files (ignore large assets)
+*.mp4
+*.webm
+*.avi
+/public/rohey-clips/
+/public/media/*.mp4
+/public/media/*.webm
+/public/media/*.avi
+.claude/
+

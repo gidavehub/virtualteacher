@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+@theme {
+  --color-base-warm: #faf9f7;
+  --color-base-alt: #fafafa;
+  --color-ink: #1a1a1a;
+  --color-ink-deep: #111111;
+  --color-ink-soft: #4b5563;
+  --color-ink-mute: #9ca3af;
+  --color-rule: #e5e7eb;
+  --color-nova-lime: #d2e823;
+  --color-nova-green: #1e3932;
+
+  --animate-shake: shake 0.45s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  15%, 85% { transform: translateX(-8px); }
+  30%, 70% { transform: translateX(6px); }
+  45%, 55% { transform: translateX(-4px); }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #1f2023;

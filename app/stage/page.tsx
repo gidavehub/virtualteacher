@@ -1,363 +1,289 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { Volume2, VolumeX, Maximize, Sparkles } from "lucide-react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Volume2, VolumeX, Maximize, Sparkles, Tv, Smartphone } from "lucide-react";
+import StageEngine from "../StageEngine";
+import { STEPS, Step, buildStepDirective, StepDirective } from "../show-timeline";
+import { createStageSession, subscribeToSession, updateSessionState } from "../db-helpers";
 
-interface SessionState {
-  currentSegmentId: string;
-  mode: "video" | "avatar";
-  gesture: string;
-  subtitles: string;
-  isPlaying: boolean;
-  activeVisual?: "none" | "map" | "kenya" | "unicef";
-  updatedAt: number;
+// Generates a clean 6-digit session pin
+function generateSessionPin(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // No confusing characters like I, O, 0, 1
+  let result = "";
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
 }
 
 export default function StageProjection() {
-  const [session, setSession] = useState<SessionState | null>(null);
+  const [session, setSession] = useState<StepDirective | null>(null);
   const [unlocked, setUnlocked] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [steps, setSteps] = useState<Step[]>(STEPS);
+  const [pin, setPin] = useState<string>("");
+  const [origin, setOrigin] = useState<string>("");
+  const [authorized, setAuthorized] = useState(false);
+  const hasInitializedSession = useRef(false);
 
-  // References to our double-buffered video elements
-  const preRecordedVideoRef = useRef<HTMLVideoElement>(null);
-  const standbyVideoRef = useRef<HTMLVideoElement>(null);
-
-  // Sync state via local high-frequency polling (every 300ms)
+  // Route security check with localhost/offline bypass
   useEffect(() => {
-    let active = true;
-
-    async function pollState() {
-      try {
-        const res = await fetch("/api/session");
-        if (!res.ok) throw new Error("Local session API fetch failed");
-        const data = await res.json();
-        if (active) {
-          setSession(data);
+    if (typeof window !== "undefined") {
+      const isLocal = window.location.hostname === "localhost" || 
+                      window.location.hostname === "127.0.0.1" || 
+                      window.location.hostname.startsWith("192.168.");
+      const isUnlocked = localStorage.getItem("vftp_unlocked") === "true";
+      
+      if (!isLocal && !isUnlocked) {
+        window.location.href = "/";
+      } else {
+        setAuthorized(true);
+        if (isLocal) {
+          setUnlocked(true); // Auto-unlock audio overlay on localhost
         }
-      } catch (error) {
-        console.error("Local session polling error:", error);
       }
     }
-
-    pollState();
-    const interval = setInterval(pollState, 300);
-
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
   }, []);
 
-  // Monitor video mappings based on active segment
-  const getVideoSrc = (segmentId: string) => {
-    switch (segmentId) {
-      case "walk_in":
-        return "/media/rohey-walk-in.mp4";
-      case "welcome":
-        return "/media/rohey-hello.mp4";
-      case "breaks_heart":
-        return "/media/rohey-breaks-heart.mp4";
-      case "redesign_question":
-        return "/media/rohey-question.mp4";
-      case "listening":
-        return "/media/rohey-listening.mp4";
-      case "pointing_left":
-        return "/media/rohey-pointing-left.mp4";
-      case "pointing_center":
-        return "/media/rohey-looking-center.mp4";
-      case "pointing_right":
-        return "/media/rohey-pointing-right.mp4";
-      case "interactive_feedback":
-        return "/media/rohey-feedback.mp4";
-      case "giga_story":
-        return "/media/rohey-giga.mp4";
-      case "gambia_mapping":
-        return "/media/rohey-gambia.mp4";
-      case "classroom_transformed":
-        return "/media/connected-classroom.mp4";
-      case "turning_point":
-        return "/media/rohey-turning-point.mp4";
-      case "final_commitment":
-        return "/media/rohey-commitment.mp4";
-      case "class_dismissed":
-        return "/media/rohey-closing.mp4";
-      default:
-        return "/media/rohey-listening.mp4";
-    }
-  };
-
-  // Standby gesture video loops based on active gesture
-  const getStandbySrc = (gesture: string) => {
-    switch (gesture) {
-      case "left":
-        return "/media/rohey-pointing-left.mp4";
-      case "right":
-        return "/media/rohey-pointing-right.mp4";
-      case "center":
-        return "/media/rohey-looking-center.mp4";
-      default:
-        return "/media/rohey-listening.mp4";
-    }
-  };
-
-  // Sync HTML5 video play/pause/mute states based on real-time database state
+  // Load custom timeline dynamically on mount
   useEffect(() => {
-    if (!unlocked || !session) return;
-
-    const mainVid = preRecordedVideoRef.current;
-    const standbyVid = standbyVideoRef.current;
-
-    if (session.mode === "video") {
-      // Pre-recorded active segment
-      if (standbyVid) {
-        standbyVid.pause();
-      }
-
-      if (mainVid) {
-        // Swap src only if it actually changed
-        const targetSrc = getVideoSrc(session.currentSegmentId);
-        if (!mainVid.src.endsWith(targetSrc)) {
-          mainVid.src = targetSrc;
-          mainVid.load();
+    async function loadTimeline() {
+      try {
+        const res = await fetch("/api/show-timeline");
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setSteps(data);
+          }
         }
-
-        mainVid.muted = isMuted;
-        if (session.isPlaying) {
-          mainVid.play().catch((err) => console.log("Play blocked:", err));
-        } else {
-          mainVid.pause();
-        }
-      }
-    } else {
-      // Live Avatar Mode (Standby Listening loop active)
-      if (mainVid) {
-        mainVid.pause();
-      }
-
-      if (standbyVid) {
-        const targetStandbySrc = getStandbySrc(session.gesture);
-        if (!standbyVid.src.endsWith(targetStandbySrc)) {
-          standbyVid.src = targetStandbySrc;
-          standbyVid.load();
-        }
-        standbyVid.muted = true; // Standby is always silent nodding
-        if (session.isPlaying) {
-          standbyVid.play().catch((err) => console.log("Play blocked:", err));
-        } else {
-          standbyVid.pause();
-        }
+      } catch (err) {
+        console.error("Failed to load timeline:", err);
       }
     }
-  }, [session, unlocked, isMuted]);
+    loadTimeline();
+    
+    if (typeof window !== "undefined") {
+      setOrigin(window.location.origin);
+    }
+  }, []);
 
-  // Request fullscreen presentation
+  // Initialize and register Stage Session on RTDB
+  useEffect(() => {
+    if (!unlocked || hasInitializedSession.current) return;
+    hasInitializedSession.current = true;
+
+    const isLocal = typeof window !== "undefined" && 
+      (window.location.hostname === "localhost" || 
+       window.location.hostname === "127.0.0.1" || 
+       window.location.hostname.startsWith("192.168."));
+
+    const newPin = isLocal ? "LOCAL" : generateSessionPin();
+    setPin(newPin);
+
+    async function registerSession() {
+      try {
+        await createStageSession(newPin);
+        console.log(`[Stage] Registered PIN session: ${newPin}`);
+      } catch (err) {
+        console.error("Failed to create Stage session on Firestore/RTDB:", err);
+      }
+    }
+    registerSession();
+  }, [unlocked]);
+
+  // Subscribe LIVE to Realtime Database session state
+  useEffect(() => {
+    if (!pin) return;
+
+    const unsubscribe = subscribeToSession(pin, (rtdbState) => {
+      if (rtdbState) {
+        setSession(rtdbState);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [pin]);
+
+  // Sync state back to RTDB on self-healing ends
+  const post = useCallback(async (partial: Partial<StepDirective>) => {
+    if (!pin) return;
+    try {
+      await updateSessionState(pin, partial);
+    } catch (err) {
+      console.error("Failed to push state to Realtime Database:", err);
+    }
+  }, [pin]);
+
+  // Self-healing state transition: when content ends, auto-advance flow on Stage Screen.
+  // Instantly pushes the next Step directive to Realtime Database.
+  const handleStageContentEnded = useCallback(
+    (token: number) => {
+      if (!session || session.token !== token) return;
+      const cur = steps[session.stepIndex];
+      if (session.mode === "segment" && cur?.autoAdvance && session.stepIndex + 1 < steps.length) {
+        post(buildStepDirective(steps, session.stepIndex + 1, session.token + 1));
+      } else if (session.mode !== "freeze") {
+        post({ mode: "idle", mainClip: null, overlayClip: null });
+      }
+    },
+    [post, session, steps]
+  );
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((err) => {
-        console.error("Error going fullscreen:", err);
-      });
+      document.documentElement.requestFullscreen().catch(() => {});
     } else {
       document.exitFullscreen();
     }
   };
 
-  // Safe activation click to unlock HTML5 browser audio
   const handleUnlock = () => {
+    // Unlocks browser video elements
+    const videos = document.querySelectorAll("video");
+    videos.forEach((v) => {
+      try {
+        const p = v.play();
+        if (p !== undefined) {
+          p.then(() => {
+            try { v.pause(); } catch {}
+          }).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Pre-play unlock error:", err);
+      }
+    });
     setUnlocked(true);
-    // Trigger quick audio buffer playback if possible
-    const mainVid = preRecordedVideoRef.current;
-    const standbyVid = standbyVideoRef.current;
-    if (mainVid) mainVid.play().then(() => mainVid.pause()).catch(() => {});
-    if (standbyVid) standbyVid.play().then(() => standbyVid.pause()).catch(() => {});
   };
 
-  if (!unlocked) {
+  if (!authorized) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-center p-6 text-slate-800 selection:bg-indigo-100 selection:text-indigo-900 relative">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.06)_0,transparent_65%)] pointer-events-none filter blur-3xl" />
-        
-        <div className="relative z-10 max-w-lg p-10 rounded-2xl bg-white border border-slate-100 backdrop-blur-xl flex flex-col items-center shadow-xl">
-          <div className="w-16 h-16 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center mb-8 text-indigo-500">
-            <Sparkles className="w-6 h-6 animate-pulse" />
-          </div>
-          
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-900 mb-3">UNICEF Dinner Projection</h2>
-          <p className="text-xs text-slate-500 leading-relaxed mb-8 max-w-xs font-normal">
-            Unlock high-fidelity vocal tracks and initialize sub-second live database streams for the main dining room projector screen.
-          </p>
-
-          <button
-            onClick={handleUnlock}
-            className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:shadow-lg hover:shadow-indigo-500/10 text-white text-sm font-semibold tracking-wide transition-all active:scale-95 cursor-pointer"
-          >
-            INITIALIZE STAGE SYSTEM
-          </button>
+      <div className="min-h-screen bg-[#faf9f7] flex items-center justify-center font-sans text-ink-deep">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-5 h-5 border-2 border-ink-deep border-t-transparent rounded-full animate-spin" />
+          <span className="text-[10px] font-mono tracking-widest uppercase text-ink-mute">
+            Verifying Access...
+          </span>
         </div>
       </div>
     );
   }
 
+  const operatorUrl = `${origin}/operator?pin=${pin}`;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(operatorUrl)}`;
+
   return (
-    <div className="min-h-screen bg-black text-white relative flex flex-col justify-between overflow-hidden select-none">
+    <div className="min-h-screen bg-[#faf9f7] text-white relative flex flex-col justify-between overflow-hidden select-none font-sans">
       
-      {/* ── TOP UTILITY CONTROL OVERLAY (fades in on hover) ── */}
-      <div className="absolute top-6 left-8 right-8 flex justify-between items-center z-50 pointer-events-auto opacity-0 hover:opacity-100 transition-opacity duration-300">
-        <span className="text-xs font-mono text-slate-400 bg-black/60 px-3.5 py-1.5 rounded-full border border-white/[0.06] backdrop-blur-md">
-          PROJECTOR WINDOW // {session?.mode === "video" ? "PRE-RECORDED CHAPTER" : "LIVE INTERACTIVE FEED"}
-        </span>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsMuted(!isMuted)}
-            className="p-2.5 rounded-full bg-black/60 border border-white/[0.06] backdrop-blur-md hover:bg-neutral-900 text-neutral-400 hover:text-white transition-all cursor-pointer"
-            title={isMuted ? "Unmute Sound" : "Mute Sound"}
-          >
-            {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-          </button>
-          <button
-            onClick={toggleFullscreen}
-            className="p-2.5 rounded-full bg-black/60 border border-white/[0.06] backdrop-blur-md hover:bg-neutral-900 text-neutral-400 hover:text-white transition-all cursor-pointer"
-            title="Toggle Fullscreen"
-          >
-            <Maximize size={15} />
-          </button>
-        </div>
-      </div>
-
-      {/* ── DOUBLE-BUFFERED VIDEO RENDERING PIPELINE ── */}
-      <div className="absolute inset-0 z-0">
-        {/* Buffer A: Pre-Recorded Lecture Segment */}
-        <video
-          ref={preRecordedVideoRef}
-          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
-            session?.mode === "video" ? "opacity-100 z-10" : "opacity-0 z-0"
-          }`}
-          playsInline
-          loop
-          muted={isMuted}
-        />
-
-        {/* Buffer B: Standby Node Nodding Loop */}
-        <video
-          ref={standbyVideoRef}
-          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
-            session?.mode === "avatar" ? "opacity-100 z-10" : "opacity-0 z-0"
-          }`}
-          playsInline
-          loop
-          muted // nodding is strictly silent
-        />
-      </div>
-
-      {/* ── FULLSCREEN STATIC IMAGE OVERLAY / FALLBACK FOR GIGA_MAP_VIEW & BREAKS_HEART ── */}
-      {(session?.currentSegmentId === "giga_map_view" || session?.currentSegmentId === "breaks_heart") && (
-        <div className="absolute inset-0 z-20 bg-slate-950 flex items-center justify-center p-8 transition-all duration-1000 animate-scale-up">
-          <img
-            src="/media/giga-gambia-map.jpg"
-            alt="UNICEF Giga Gambia Map"
-            className="w-full h-full object-contain rounded-2xl animate-pulse-slow max-w-7xl shadow-2xl"
-          />
-        </div>
-      )}
-
-      {/* ── SIDE-SLIDE HIGH-RESOLUTION VISUAL OVERLAYS ── */}
-      {session && session.activeVisual && session.activeVisual !== "none" && (
-        <div className="absolute top-10 bottom-10 right-10 w-[42%] z-30 rounded-3xl overflow-hidden border border-white/[0.08] bg-black/65 backdrop-blur-xl shadow-2xl animate-fade-in-right flex flex-col items-center justify-center p-6">
-          <div className="relative w-full h-full rounded-2xl overflow-hidden">
-            {session.activeVisual === "map" && (
-              <img
-                src="/media/giga-gambia-map.jpg"
-                alt="UNICEF Giga Map"
-                className="w-full h-full object-contain animate-scale-up"
-              />
-            )}
-            {session.activeVisual === "kenya" && (
-              <img
-                src="/media/darlene-coding.jpg"
-                alt="Darlene coding in Kakuma"
-                className="w-full h-full object-cover rounded-2xl animate-scale-up"
-              />
-            )}
-            {session.activeVisual === "unicef" && (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-black/40 p-8 text-center">
-                <img
-                  src="/rohey-avatar.jpg"
-                  alt="UNICEF Gambia Logo"
-                  className="w-40 h-40 object-cover rounded-full mb-8 border-2 border-white/10"
-                />
-                <h3 className="text-xl font-semibold mb-3">UNICEF The Gambia</h3>
-                <p className="text-xs text-neutral-400 leading-relaxed max-w-xs">
-                  Access to affordable, sustainable, safe and resilient connectivity for every child.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── GESTURE ACTION HUD BANNER ── */}
-      {session && session.mode === "avatar" && session.gesture && session.gesture !== "none" && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-40 bg-black/55 backdrop-blur-md border border-white/[0.08] rounded-full px-5 py-2 flex items-center gap-2.5 text-xs font-mono tracking-widest text-purple-300 uppercase animate-bounce shadow-lg">
-          <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping" />
-          <span>ROHEY ACTION: POINTING {session.gesture}</span>
-        </div>
-      )}
-
-      {/* ── CINEMATIC GLASS-BLACK SUBTITLES OVERLAY ── */}
-      {session && session.subtitles && (
-        <div className="w-full flex justify-center pb-12 px-12 z-40 relative mt-auto">
-          <div className="max-w-4xl bg-black/75 backdrop-blur-md border border-white/[0.06] shadow-[0_24px_50px_rgba(0,0,0,0.85)] px-10 py-5 rounded-2xl text-center flex flex-col items-center gap-1.5">
-            {session.mode === "avatar" && (
-              <span className="text-[9px] font-mono text-purple-400 tracking-[0.2em] font-bold uppercase animate-pulse">
-                LIVE INTERACTION FEED
-              </span>
-            )}
-            <p className="text-2xl md:text-[28px] font-serif text-white leading-relaxed tracking-wide font-normal drop-shadow-md">
-              &ldquo;{session.subtitles}&rdquo;
+      {/* INITIALIZE AUDIO SYSTEM Gated Modal */}
+      {!unlocked && (
+        <div className="fixed inset-0 bg-base-warm flex flex-col items-center justify-center text-center p-6 z-[100] text-ink-deep">
+          <div className="max-w-md p-10 rounded-2xl bg-white border border-rule flex flex-col items-center shadow-xl">
+            <div className="w-16 h-16 rounded-xl bg-neutral-50 border border-rule flex items-center justify-center mb-8 text-ink-soft">
+              <Tv className="w-6 h-6" />
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight text-ink-deep mb-3">
+              UNICEF Dinner Projection
+            </h2>
+            <p className="text-xs text-ink-soft leading-relaxed mb-8 max-w-xs font-normal">
+              Unlock local browser audio and register this screen's projection session with the DaveLabs network.
             </p>
+            <button
+              onClick={handleUnlock}
+              className="w-full py-4 px-6 rounded-lg bg-ink-deep hover:bg-neutral-800 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-sm"
+            >
+              INITIALIZE STAGE SYSTEM
+            </button>
           </div>
         </div>
       )}
 
-      {/* Embedded micro-animations */}
-      <style dangerouslySetInnerHTML={{ __html: `
-        @keyframes fadeInRight {
-          from {
-            opacity: 0;
-            transform: translateX(50px) scale(0.98);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0) scale(1);
-          }
-        }
-        .animate-fade-in-right {
-          animation: fadeInRight 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        }
+      {/* PAIRING AND STANDBY SCREEN (Shown before Operator launches show) */}
+      {unlocked && pin && (!session || !session.started) && (
+        <div className="fixed inset-0 bg-base-warm flex flex-col items-center justify-center text-ink-deep z-40 p-6">
+          <div className="absolute top-8 left-8 flex items-center gap-3">
+            <img
+              src="/media/davelabslogo.png"
+              alt="DaveLabs"
+              width={28}
+              height={28}
+              className="object-contain"
+            />
+            <div className="leading-tight">
+              <span className="block text-[12px] font-bold text-ink-deep">DaveLabs</span>
+              <span className="block text-[8px] font-mono tracking-[0.2em] text-ink-mute uppercase font-bold">Virtual Teacher</span>
+            </div>
+          </div>
 
-        @keyframes scaleUp {
-          from {
-            transform: scale(0.95);
-            opacity: 0.8;
-          }
-          to {
-            transform: scale(1);
-            opacity: 1;
-          }
-        }
-        .animate-scale-up {
-          animation: scaleUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        }
+          <div className="max-w-md w-full p-8 sm:p-10 rounded-2xl bg-white border border-rule flex flex-col items-center shadow-md space-y-8 text-center">
+            
+            <div className="space-y-2">
+              <span className="inline-flex items-center gap-1 text-[9px] font-mono text-ink-mute uppercase tracking-widest bg-neutral-50 border border-rule px-2 py-0.5 rounded">
+                Stage stand-by
+              </span>
+              <h2 className="text-2xl font-bold tracking-tight text-ink-deep">Connect Operator Console</h2>
+              <p className="text-xs text-ink-soft max-w-xs mx-auto leading-relaxed font-normal">
+                To connect and drive Rohey on this projection screen, input the passcode below on your control device, or scan the QR code to auto-connect instantly.
+              </p>
+            </div>
 
-        @keyframes pulseSlow {
-          0%, 100% { opacity: 0.90; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.02); }
-        }
-        .animate-pulse-slow {
-          animation: pulseSlow 5s ease-in-out infinite;
-        }
-      ` }} />
+            {/* Session PIN Box */}
+            <div className="py-4 px-8 bg-neutral-50 border-2 border-dashed border-rule rounded-xl">
+              <span className="block text-[10px] font-mono text-ink-mute uppercase tracking-widest mb-1 font-bold">Connection Passcode</span>
+              <span className="text-4xl font-mono font-black tracking-wider text-ink-deep">{pin}</span>
+            </div>
 
+            {/* QR Code */}
+            <div className="flex flex-col items-center space-y-3">
+              <div className="p-3 bg-white border border-rule rounded-xl shadow-xs">
+                <img
+                  src={qrCodeUrl}
+                  alt={`QR Code for operator connect: ${operatorUrl}`}
+                  className="w-[160px] h-[160px] object-contain"
+                />
+              </div>
+              <span className="text-[10px] font-mono text-ink-mute flex items-center gap-1.5 font-bold">
+                <Smartphone size={12} /> SCAN TO PAIR AND OPERATE
+              </span>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Utility Overlay Controls (visible on hover) */}
+      {unlocked && session && session.started && (
+        <div className="absolute top-6 left-8 right-8 flex justify-between items-center z-50 opacity-0 hover:opacity-100 transition-opacity duration-300">
+          <span className="text-[10px] font-mono text-slate-300 bg-black/60 px-4 py-1.5 rounded-full border border-white/[0.06] backdrop-blur-md uppercase tracking-wider font-bold">
+            STAGE SESSION: {pin} // LIVE
+          </span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsMuted(!isMuted)}
+              className="p-2.5 rounded-full bg-black/60 border border-white/[0.06] backdrop-blur-md hover:bg-neutral-900 text-neutral-400 hover:text-white transition-all cursor-pointer"
+            >
+              {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            </button>
+            <button
+              onClick={toggleFullscreen}
+              className="p-2.5 rounded-full bg-black/60 border border-white/[0.06] backdrop-blur-md hover:bg-neutral-900 text-neutral-400 hover:text-white transition-all cursor-pointer"
+            >
+              <Maximize size={15} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Layered video engine connected LIVE to RTDB state */}
+      <div className="absolute inset-0 z-0 bg-black">
+        {unlocked && session && session.started && (
+          <StageEngine
+            session={session}
+            active={unlocked}
+            muted={isMuted}
+            onContentEnded={handleStageContentEnded}
+          />
+        )}
+      </div>
     </div>
   );
 }
