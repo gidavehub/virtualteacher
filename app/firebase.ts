@@ -7,6 +7,7 @@ export const firebaseConfig = {
   apiKey: "AIzaSyBQF1B9nFwJFD8_JiaN7udBDozkObnZfBs",
   authDomain: "virtual-teacher-project-501606.firebaseapp.com",
   projectId: "virtual-teacher-project-501606",
+  databaseURL: "https://virtual-teacher-project-501606-default-rtdb.firebaseio.com",
   storageBucket: "virtual-teacher-project-501606.firebasestorage.app",
   messagingSenderId: "270840241274",
   appId: "1:270840241274:web:cabea1f968d977b523efc3",
