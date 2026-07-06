@@ -1,6 +1,6 @@
 import { db, rtdb } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { ref, set, onValue, off } from "firebase/database";
+import { ref, set, update, onValue, off } from "firebase/database";
 import { StepDirective } from "./show-timeline";
 
 // Generate random 8-character alphanumeric code
@@ -152,14 +152,17 @@ export async function updateSessionState(pin: string, state: Partial<StepDirecti
   }
 
   const rtdbRef = ref(rtdb, `sessions/${cleanedPin}`);
-  
+
   // Merge state with timestamp
   const payload = {
     ...state,
     updatedAt: Date.now(),
   };
 
-  await set(rtdbRef, payload);
+  // update() MERGES into the existing session node. set() would replace the
+  // whole node with this partial (a lone { paused } post would wipe
+  // mainClip/token/etc. mid-show on the live network).
+  await update(rtdbRef, payload);
 }
 
 // Listen to RTDB updates (for Stage and Operator sync)

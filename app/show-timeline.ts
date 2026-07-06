@@ -225,6 +225,9 @@ export const STEPS: Step[] = [
     label: "Write Commitment Question",
     kind: "play",
     overlay: 19, // walks to the board and writes it (silent)
+    main: 19.5, // "I have one final question… what can you and your organization do…" audio
+    endAlign: true, // same pattern as 5/5.5 — audio leads, board-writing lands at the end
+    autoAdvance: true, // flows straight into the Monitors & Cards line
     caption:
       "What can you and your organization do to help connect every school, health facility and TVET facility in The Gambia?",
   },

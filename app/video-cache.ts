@@ -3,10 +3,11 @@
 
 export const CACHE_NAME = "vftp-video-cache";
 
-// Generate the list of 26 video clip URLs to cache
+// Generate the list of 27 video clip URLs to cache
 export const CLIPS_TO_CACHE = [
   ...Array.from({ length: 25 }, (_, i) => i + 1),
-  5.5
+  5.5,
+  19.5
 ];
 
 export function getGCSClipUrl(clipNum: number | string): string {

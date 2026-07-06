@@ -267,22 +267,25 @@ export default function StageEngine({
       main?.pause();
       overlay?.pause();
     } else {
+      // NOTE: never call play() on a video whose `ended` flag is set — play()
+      // on an ended element restarts it from 0. That replayed the walk-out
+      // clip a second time while it was frozen on the empty-room frame.
       if (wasPaused === true) {
         // We are resuming from an explicit paused state
         if (idle && !overlayVisible && !mainVisible) {
           idle.play().catch(() => {});
         }
-        if (main && session.mainClip != null && !mainVisible && overlayVisible && !session.endAlign) {
+        if (main && session.mainClip != null && !mainVisible && overlayVisible && !session.endAlign && !main.ended) {
           // If main is not visible yet but should be, and overlay is active, start speech immediately on resume.
           main.muted = muted;
           main.volume = 1.0;
           main.play().catch(() => {});
           setOverlayVisible(false);
           setMainVisible(true);
-        } else if (main && mainVisible) {
+        } else if (main && mainVisible && !main.ended) {
           main.play().catch(() => {});
         }
-        if (overlay && overlayVisible) {
+        if (overlay && overlayVisible && !overlay.ended) {
           overlay.play().catch(() => {});
         }
       } else {
@@ -290,10 +293,10 @@ export default function StageEngine({
         if (idle && !overlayVisible && !mainVisible) {
           idle.play().catch(() => {});
         }
-        if (main && mainVisible) {
+        if (main && mainVisible && !main.ended) {
           main.play().catch(() => {});
         }
-        if (overlay && overlayVisible) {
+        if (overlay && overlayVisible && !overlay.ended) {
           overlay.play().catch(() => {});
         }
       }
@@ -374,11 +377,11 @@ export default function StageEngine({
 
   return (
     <div className="absolute inset-0 bg-black">
+      {/* Idle loop stays fully opaque at the bottom of the stack — overlay and
+          main fades always reveal live video underneath, never black. */}
       <video
         ref={idleRef}
-        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
-          !overlayVisible && !mainVisible ? "opacity-100" : "opacity-0"
-        }`}
+        className="absolute inset-0 w-full h-full object-cover"
         playsInline
         loop
         muted
