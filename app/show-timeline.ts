@@ -158,17 +158,17 @@ export const STEPS: Step[] = [
   },
   {
     id: 15, label: "Giga Story · Sierra Leone", kind: "play", clip: 18, autoAdvance: true, idleClip: IDLE_CLASSROOM,
-    photoSet: { folder: "all", count: 16 },
+    photoSet: { folder: "sierra_leone", count: 5 },
     caption: "In Sierra Leone the cost dropped from $12,000 to just $1,500 per school, per year — nearly 90%.",
   },
   {
     id: 16, label: "Giga Story · Kenya", kind: "play", clip: 19, autoAdvance: true, idleClip: IDLE_CLASSROOM,
-    photoSet: { folder: "all", count: 16 },
+    photoSet: { folder: "kenya", count: 5 },
     caption: "In Kakuma refugee camp, Darlene is learning to code. She wants to become a software engineer.",
   },
   {
     id: 17, label: "Giga Story · The Gambia", kind: "play", clip: 20, autoAdvance: true, idleClip: IDLE_CLASSROOM,
-    photoSet: { folder: "all", count: 16 },
+    photoSet: { folder: "the_gambia", count: 6 },
     caption: "Every single one of the 1,978 schools is now on the map. And Giga will reach beyond schools.",
   },
   {

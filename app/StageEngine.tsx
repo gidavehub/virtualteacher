@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { StepDirective } from "./show-timeline";
 import { getClipUrl, getPhotoUrl } from "./video-cache";
+import { subscribePhotosForSegment } from "./db-helpers";
 
 // Back-compat alias — operator/stage import this name.
 export type Directive = StepDirective;
@@ -50,6 +51,23 @@ export default function StageEngine({
   const lastToken = useRef<number>(-1);
 
   // ── Photo overlay state ──
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  useEffect(() => {
+    const folder = session?.photoFolder;
+    if (!folder) {
+      setPhotoUrls([]);
+      return;
+    }
+    const unsubscribe = subscribePhotosForSegment(folder, (urls) => {
+      setPhotoUrls(urls);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [session?.photoFolder]);
+
+  const photoSrc = (i: number) => photoUrls[i] || "";
+
   const [photoIdx, setPhotoIdx] = useState(-1); // index currently "in front"
   const [poppedUpIndices, setPoppedUpIndices] = useState<number[]>([]);
   const photoTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -237,13 +255,13 @@ export default function StageEngine({
   // ── Photo overlay cycle, timed across the clip's duration ──
   useEffect(() => {
     if (!active || !session || session.mode !== "segment") return;
-    if (!session.photoFolder || session.photoCount <= 0) return;
+    if (!session.photoFolder || photoUrls.length === 0) return;
     if (session.token !== lastToken.current) return; // wait for apply()
 
     const cur = bufEl(activeBuf);
     if (!cur || session.paused) return;
 
-    const count = session.photoCount;
+    const count = photoUrls.length;
     const startCycle = () => {
       const dur = isFinite(cur.duration) && cur.duration > 0 ? cur.duration : count * 6;
       const interval = Math.max(4000, Math.min(9000, (dur * 1000) / (count + 1)));
@@ -288,7 +306,7 @@ export default function StageEngine({
       frontTimer.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.token, activeBuf, active, session?.paused]);
+  }, [session?.token, activeBuf, active, session?.paused, photoUrls]);
 
   // ── Progress reporting from the active buffer ──
   useEffect(() => {
@@ -308,29 +326,7 @@ export default function StageEngine({
     onContentEnded?.(lastToken.current);
   };
 
-  // Photo URLs resolve through the offline cache (blob URLs) with the local
-  // public copy as an instant fallback while they resolve.
-  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
-  useEffect(() => {
-    const folder = session?.photoFolder;
-    const count = session?.photoCount ?? 0;
-    if (!folder || count <= 0) {
-      setPhotoUrls([]);
-      return;
-    }
-    let alive = true;
-    Promise.all(Array.from({ length: count }, (_, i) => getPhotoUrl(folder, i + 1))).then(
-      (urls) => {
-        if (alive) setPhotoUrls(urls);
-      }
-    );
-    return () => {
-      alive = false;
-    };
-  }, [session?.photoFolder, session?.photoCount]);
 
-  const photoSrc = (i: number) =>
-    photoUrls[i] ?? `/photos/${session?.photoFolder}/${i + 1}.jpeg`;
 
   // Remember the last photo shown "in front" so it can fade out gracefully
   // instead of vanishing the instant it docks.
@@ -360,7 +356,7 @@ export default function StageEngine({
       <video ref={bufBRef} onEnded={handleEnded("B")} className={bufClass("B")} playsInline />
 
       {/* ── Photo overlay: a queue of popped up photos scrolling continuously ── */}
-      {session?.photoFolder && (session.photoCount ?? 0) > 0 && (
+      {session?.photoFolder && photoUrls.length > 0 && (
         <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
           {/* Scroll ring queue — moves continuously focusing on the latest item */}
           {poppedUpIndices.length > 0 && (

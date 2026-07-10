@@ -234,3 +234,119 @@ export function subscribeToSession(pin: string, callback: (state: any) => void):
     off(rtdbRef, "value", listener);
   };
 }
+
+// ── PHOTO SEGMENTS CONFIG & MANAGEMENT ─────────────────────────────────────
+
+export const DEFAULT_PHOTOS: Record<string, string[]> = {
+  sierra_leone: [
+    "/photos/all/1.jpeg",
+    "/photos/all/2.jpeg",
+    "/photos/all/3.jpeg",
+    "/photos/all/4.jpeg",
+    "/photos/all/5.jpeg"
+  ],
+  kenya: [
+    "/photos/all/6.jpeg",
+    "/photos/all/7.jpeg",
+    "/photos/all/8.jpeg",
+    "/photos/all/9.jpeg",
+    "/photos/all/10.jpeg"
+  ],
+  the_gambia: [
+    "/photos/all/11.jpeg",
+    "/photos/all/12.jpeg",
+    "/photos/all/13.jpeg",
+    "/photos/all/14.jpeg",
+    "/photos/all/15.jpeg",
+    "/photos/all/16.jpeg"
+  ]
+};
+
+export async function getPhotosForSegment(segmentId: string): Promise<string[]> {
+  const defaults = DEFAULT_PHOTOS[segmentId] || [];
+  if (isLocalhost()) {
+    try {
+      const stored = localStorage.getItem(`vtp_photos_${segmentId}`);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return defaults;
+  }
+
+  const docRef = doc(db, "photos", segmentId);
+  try {
+    const snap = await getDoc(docRef);
+    if (snap.exists() && snap.data().list) {
+      return snap.data().list;
+    }
+  } catch (err) {
+    console.error(`Error loading photos for segment ${segmentId}:`, err);
+  }
+  return defaults;
+}
+
+export async function savePhotosForSegment(segmentId: string, list: string[]): Promise<void> {
+  if (isLocalhost()) {
+    try {
+      localStorage.setItem(`vtp_photos_${segmentId}`, JSON.stringify(list));
+      const channel = new BroadcastChannel("vtp_photo_sync");
+      channel.postMessage({ segmentId, list });
+      channel.close();
+    } catch {}
+    return;
+  }
+
+  const docRef = doc(db, "photos", segmentId);
+  await setDoc(docRef, { list, updatedAt: Date.now() });
+
+  // Update in RTDB too for live syncing
+  const rtdbRef = ref(rtdb, `photos/${segmentId}`);
+  await set(rtdbRef, { list, updatedAt: Date.now() });
+}
+
+export function subscribePhotosForSegment(
+  segmentId: string,
+  onUpdate: (list: string[]) => void
+): () => void {
+  const defaults = DEFAULT_PHOTOS[segmentId] || [];
+
+  if (isLocalhost()) {
+    const handleStorageChange = () => {
+      onUpdate(JSON.parse(localStorage.getItem(`vtp_photos_${segmentId}`) || "null") || defaults);
+    };
+    window.addEventListener("storage", handleStorageChange);
+    
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("vtp_photo_sync");
+      channel.onmessage = (e) => {
+        if (e.data && e.data.segmentId === segmentId) {
+          onUpdate(e.data.list);
+        }
+      };
+    } catch {}
+
+    // Initial load
+    handleStorageChange();
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      if (channel) channel.close();
+    };
+  }
+
+  const rtdbRef = ref(rtdb, `photos/${segmentId}`);
+  const callback = (snapshot: any) => {
+    const data = snapshot.val();
+    if (snapshot.exists() && data && data.list) {
+      onUpdate(data.list);
+    } else {
+      // Check firestore as fallback, or use defaults
+      getPhotosForSegment(segmentId).then(onUpdate);
+    }
+  };
+
+  onValue(rtdbRef, callback);
+  return () => {
+    off(rtdbRef, "value", callback);
+  };
+}
