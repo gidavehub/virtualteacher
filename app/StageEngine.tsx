@@ -321,14 +321,19 @@ export default function StageEngine({
                 }}
               >
                 {[0, 1].map((rep) =>
-                  poppedUpIndices.map((idx) => (
-                    <img
-                      key={`${rep}-${idx}`}
-                      src={photoSrc(idx)}
-                      alt=""
-                      className="h-24 md:h-32 mr-3 rounded-lg object-cover border border-white/20 shadow-xl opacity-90"
-                    />
-                  ))
+                  poppedUpIndices.map((idx) => {
+                    const isLatest = idx === poppedUpIndices[poppedUpIndices.length - 1];
+                    return (
+                      <img
+                        key={`${rep}-${idx}`}
+                        src={photoSrc(idx)}
+                        alt=""
+                        className={`h-24 md:h-32 rounded-lg object-cover border border-white/20 shadow-xl opacity-90 ${
+                          isLatest ? "animate-join-ring" : "mr-3"
+                        }`}
+                      />
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -361,6 +366,32 @@ export default function StageEngine({
           to   { transform: translateX(-50%); }
         }
         .animate-marquee { animation: marquee linear infinite; }
+
+        @keyframes joinRing {
+          0% {
+            opacity: 0;
+            transform: scale(0) translateY(-40px) rotate(-10deg);
+            max-width: 0;
+            margin-right: 0;
+            filter: brightness(2) blur(4px);
+          }
+          50% {
+            opacity: 0.5;
+            max-width: 320px;
+            margin-right: 12px;
+          }
+          100% {
+            opacity: 0.9;
+            transform: scale(1) translateY(0) rotate(0deg);
+            max-width: 320px;
+            margin-right: 12px;
+            filter: brightness(1) blur(0);
+          }
+        }
+        .animate-join-ring {
+          animation: joinRing 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+          transform-origin: center center;
+        }
       ` }} />
     </div>
   );
