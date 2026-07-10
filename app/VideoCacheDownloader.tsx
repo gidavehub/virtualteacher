@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Download, CheckCircle, Database } from "lucide-react";
-import { downloadAndCacheAllVideos, checkCacheStatus, CLIPS_TO_CACHE, ProgressReport } from "./video-cache";
+import { downloadAndCacheAllVideos, checkCacheStatus, TOTAL_ASSETS, ProgressReport } from "./video-cache";
 
 interface Props {
   onComplete: () => void;
@@ -100,7 +100,7 @@ export default function VideoCacheDownloader({ onComplete }: Props) {
               {isComplete ? "Assets Caching Complete" : downloading ? "Pre-Downloading Assets" : "Pre-Download Required"}
             </h2>
             <p className="text-xs text-ink-soft leading-relaxed max-w-sm mx-auto font-normal">
-              To guarantee zero buffering, instant latency-free scene shifting, and perfect presentation delivery before live audiences, we download all 26 high-fidelity video clips (~400MB) directly to your local browser cache storage.
+              To guarantee zero buffering, instant latency-free scene shifting, and perfect presentation delivery before live audiences, we download all 36 high-fidelity scene videos and the photo gallery (~650MB) directly to your local browser cache storage.
             </p>
           </div>
 
@@ -110,7 +110,7 @@ export default function VideoCacheDownloader({ onComplete }: Props) {
                 onClick={startPreDownload}
                 className="w-full py-3.5 px-6 rounded-lg bg-ink-deep text-white hover:bg-neutral-800 text-xs font-semibold uppercase tracking-wider transition-all shadow-xs active:scale-[0.99] cursor-pointer"
               >
-                Download Assets (400MB)
+                Download Assets (~650MB)
               </button>
               {error && (
                 <p className="text-xs text-red-500 font-mono font-medium max-w-xs mx-auto">
@@ -122,7 +122,7 @@ export default function VideoCacheDownloader({ onComplete }: Props) {
             <div className="space-y-4 pt-4 bg-white border border-rule p-6 rounded-xl shadow-2xs">
               <div className="flex justify-between items-center text-[10px] font-mono text-ink-soft uppercase tracking-wider">
                 <span className="font-semibold">
-                  {isComplete ? "Cached successfully" : `Caching file ${progress?.filesDownloaded ?? 0} of ${progress?.totalFiles ?? CLIPS_TO_CACHE.length}`}
+                  {isComplete ? "Cached successfully" : `Caching file ${progress?.filesDownloaded ?? 0} of ${progress?.totalFiles ?? TOTAL_ASSETS}`}
                 </span>
                 <span className="font-bold text-ink-deep">
                   {progress?.percent ?? 0}%

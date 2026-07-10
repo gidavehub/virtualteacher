@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { StepDirective } from "./show-timeline";
-import { getClipUrl } from "./video-cache";
+import { getClipUrl, getPhotoUrl } from "./video-cache";
 
 // Back-compat alias — operator/stage import this name.
 export type Directive = StepDirective;
@@ -248,7 +248,29 @@ export default function StageEngine({
     onContentEnded?.(lastToken.current);
   };
 
-  const photoSrc = (i: number) => `/photos/${session?.photoFolder}/${i + 1}.jpeg`;
+  // Photo URLs resolve through the offline cache (blob URLs) with the local
+  // public copy as an instant fallback while they resolve.
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  useEffect(() => {
+    const folder = session?.photoFolder;
+    const count = session?.photoCount ?? 0;
+    if (!folder || count <= 0) {
+      setPhotoUrls([]);
+      return;
+    }
+    let alive = true;
+    Promise.all(Array.from({ length: count }, (_, i) => getPhotoUrl(folder, i + 1))).then(
+      (urls) => {
+        if (alive) setPhotoUrls(urls);
+      }
+    );
+    return () => {
+      alive = false;
+    };
+  }, [session?.photoFolder, session?.photoCount]);
+
+  const photoSrc = (i: number) =>
+    photoUrls[i] ?? `/photos/${session?.photoFolder}/${i + 1}.jpeg`;
 
   // Remember the last photo shown "in front" so it can fade out gracefully
   // instead of vanishing the instant it docks.

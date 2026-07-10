@@ -6,9 +6,37 @@ export const CACHE_NAME = "vftp-video-cache-v2";
 // The 36 final v2 clips (audio baked in) to cache for offline playback
 export const CLIPS_TO_CACHE = Array.from({ length: 36 }, (_, i) => i + 1);
 
+// The site-visit photo sets shown during the Giga story — cached alongside
+// the clips so the whole show (video + gallery) runs offline, zero buffering.
+export const PHOTO_SETS: { folder: string; count: number }[] = [
+  { folder: "sierra-leone", count: 3 },
+  { folder: "kenya", count: 1 },
+  { folder: "gambia", count: 12 },
+];
+
+const GCS_BASE = "https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app";
+
 export function getGCSClipUrl(clipNum: number | string): string {
-  return `https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app/rohey-clips-v2/${clipNum}.mp4`;
+  return `${GCS_BASE}/rohey-clips-v2/${clipNum}.mp4`;
 }
+
+export function getGCSPhotoUrl(folder: string, n: number): string {
+  return `${GCS_BASE}/photos/${folder}/${n}.jpeg`;
+}
+
+// Every asset the show needs, as {url, name} — clips first, then photos.
+function allAssets(): { url: string; name: string }[] {
+  const clips = CLIPS_TO_CACHE.map((n) => ({ url: getGCSClipUrl(n), name: `${n}.mp4` }));
+  const photos = PHOTO_SETS.flatMap((s) =>
+    Array.from({ length: s.count }, (_, i) => ({
+      url: getGCSPhotoUrl(s.folder, i + 1),
+      name: `${s.folder}/${i + 1}.jpeg`,
+    }))
+  );
+  return [...clips, ...photos];
+}
+
+export const TOTAL_ASSETS = CLIPS_TO_CACHE.length + PHOTO_SETS.reduce((a, s) => a + s.count, 0);
 
 export interface ProgressReport {
   filesDownloaded: number;
@@ -19,21 +47,20 @@ export interface ProgressReport {
   totalBytes: number;
 }
 
-// Check if all clips are already cached
+// Check if every show asset (clips + photos) is already cached
 export async function checkCacheStatus(): Promise<boolean> {
   if (typeof window === "undefined" || !("caches" in window)) return false;
   try {
     const cache = await caches.open(CACHE_NAME);
     const keys = await cache.keys();
-    // We expect 26 cached video assets
-    return keys.length >= CLIPS_TO_CACHE.length;
+    return keys.length >= TOTAL_ASSETS;
   } catch (err) {
     console.error("Error checking cache status:", err);
     return false;
   }
 }
 
-// Download all clips and report progress
+// Download every show asset (clips + photos) and report progress
 export async function downloadAndCacheAllVideos(
   onProgress: (progress: ProgressReport) => void
 ): Promise<void> {
@@ -42,53 +69,61 @@ export async function downloadAndCacheAllVideos(
   }
 
   const cache = await caches.open(CACHE_NAME);
-  const totalFiles = CLIPS_TO_CACHE.length;
+  const assets = allAssets();
+  const totalFiles = assets.length;
   let filesDownloaded = 0;
 
-  // Approximate sizes of files in MB (total around 400-500MB)
-  // We'll use progress-based fetch reading streams to show highly detailed real-time progress.
-  for (let i = 0; i < CLIPS_TO_CACHE.length; i++) {
-    const clipNum = CLIPS_TO_CACHE[i];
-    const url = getGCSClipUrl(clipNum);
-    const fileName = `${clipNum}.mp4`;
+  const report = (currentFileName: string) => {
+    onProgress({
+      filesDownloaded,
+      totalFiles,
+      percent: Math.round((filesDownloaded / totalFiles) * 100),
+      currentFileName,
+      bytesDownloaded: 0,
+      totalBytes: 0,
+    });
+  };
 
-    // Check if already in cache
-    const existing = await cache.match(url);
+  for (const asset of assets) {
+    // Skip anything already in the cache
+    const existing = await cache.match(asset.url);
     if (existing) {
       filesDownloaded++;
-      onProgress({
-        filesDownloaded,
-        totalFiles,
-        percent: Math.round((filesDownloaded / totalFiles) * 100),
-        currentFileName: fileName,
-        bytesDownloaded: 0,
-        totalBytes: 0,
-      });
+      report(asset.name);
       continue;
     }
 
     try {
-      const response = await fetch(url);
+      const response = await fetch(asset.url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-      // Optional: use a stream reader to track exact bytes loaded for this file
-      const clonedResponse = response.clone();
-      await cache.put(url, clonedResponse);
-
+      await cache.put(asset.url, response.clone());
       filesDownloaded++;
-      onProgress({
-        filesDownloaded,
-        totalFiles,
-        percent: Math.round((filesDownloaded / totalFiles) * 100),
-        currentFileName: fileName,
-        bytesDownloaded: 0,
-        totalBytes: 0,
-      });
+      report(asset.name);
     } catch (err) {
-      console.error(`Failed to cache ${fileName}:`, err);
+      console.error(`Failed to cache ${asset.name}:`, err);
       throw err;
     }
   }
+}
+
+// Get local Blob URL for a cached photo, or fallback to GCS URL
+export async function getPhotoUrl(folder: string, n: number): Promise<string> {
+  const gcsUrl = getGCSPhotoUrl(folder, n);
+  if (typeof window === "undefined" || !("caches" in window)) return gcsUrl;
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const matched = await cache.match(gcsUrl);
+    if (matched) {
+      if (blobUrlMap[gcsUrl]) return blobUrlMap[gcsUrl];
+      const blob = await matched.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      blobUrlMap[gcsUrl] = blobUrl;
+      return blobUrl;
+    }
+  } catch (err) {
+    console.error(`Error resolving cached photo ${folder}/${n}:`, err);
+  }
+  return gcsUrl;
 }
 
 // Get local Blob URL for cached clip, or fallback to GCS URL
