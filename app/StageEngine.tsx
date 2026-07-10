@@ -55,6 +55,59 @@ export default function StageEngine({
   const photoTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const frontTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [currentInterval, setCurrentInterval] = useState(6000);
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const lastTimeRef = useRef<number | null>(null);
+
+  const pausedRef = useRef(session?.paused ?? false);
+  pausedRef.current = session?.paused ?? false;
+
+  const intervalRef = useRef(6000);
+  intervalRef.current = currentInterval;
+
+  const poppedUpCountRef = useRef(0);
+  poppedUpCountRef.current = poppedUpIndices.length;
+
+  // ── Scroll animation loop ──
+  useEffect(() => {
+    if (!active) {
+      lastTimeRef.current = null;
+      return;
+    }
+
+    const itemWidth = 176; // IMAGE_WIDTH (160) + MARGIN_RIGHT (16)
+    let frameId: number;
+
+    const tick = (now: number) => {
+      if (lastTimeRef.current !== null) {
+        const dt = (now - lastTimeRef.current) / 1000; // in seconds
+        
+        // Only scroll if not paused and we have items
+        if (!pausedRef.current && poppedUpCountRef.current > 0) {
+          const speed = itemWidth / (intervalRef.current / 1000); // pixels per second
+          setScrollOffset((prev) => prev - speed * dt);
+        }
+      }
+      lastTimeRef.current = now;
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frameId);
+      lastTimeRef.current = null;
+    };
+  }, [active]);
+
+  // ── Sync scroll offset with first item ──
+  useEffect(() => {
+    if (poppedUpIndices.length === 1) {
+      setScrollOffset(-80); // -IMAGE_WIDTH / 2 (160 / 2)
+    } else if (poppedUpIndices.length === 0) {
+      setScrollOffset(0);
+    }
+  }, [poppedUpIndices.length]);
+
   const bufEl = (which: "A" | "B" | null) =>
     which === "A" ? bufARef.current : which === "B" ? bufBRef.current : null;
 
@@ -194,6 +247,7 @@ export default function StageEngine({
     const startCycle = () => {
       const dur = isFinite(cur.duration) && cur.duration > 0 ? cur.duration : count * 6;
       const interval = Math.max(4000, Math.min(9000, (dur * 1000) / (count + 1)));
+      setCurrentInterval(interval);
       // One pooled gallery — shuffle the order every scene and keep rotating
       // through all of them for as long as the clip runs.
       const order = Array.from({ length: count }, (_, k) => k);
@@ -305,36 +359,35 @@ export default function StageEngine({
       <video ref={bufARef} onEnded={handleEnded("A")} className={bufClass("A")} playsInline />
       <video ref={bufBRef} onEnded={handleEnded("B")} className={bufClass("B")} playsInline />
 
-      {/* ── Photo overlay: an infinite scrolling ring of the whole gallery
-             along the top, plus the featured photo big in front ── */}
+      {/* ── Photo overlay: a queue of popped up photos scrolling continuously ── */}
       {session?.photoFolder && (session.photoCount ?? 0) > 0 && (
         <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
-          {/* Infinite scroll ring — the full pool glides by continuously;
-              the sequence is doubled so the loop is seamless */}
+          {/* Scroll ring queue — moves continuously focusing on the latest item */}
           {poppedUpIndices.length > 0 && (
-            <div className="absolute top-6 left-0 right-0 overflow-hidden">
+            <div className="absolute top-6 left-0 right-0 overflow-hidden h-36">
               <div
-                className="flex items-center w-max animate-marquee"
+                className="flex items-center absolute left-0"
                 style={{
-                  animationDuration: `${Math.max(30, poppedUpIndices.length * 3.5)}s`,
-                  animationPlayState: session.paused ? "paused" : "running",
+                  transform: `translateX(calc(50vw + ${scrollOffset}px))`,
+                  width: "max-content",
                 }}
               >
-                {[0, 1].map((rep) =>
-                  poppedUpIndices.map((idx) => {
-                    const isLatest = idx === poppedUpIndices[poppedUpIndices.length - 1];
-                    return (
-                      <img
-                        key={`${rep}-${idx}`}
-                        src={photoSrc(idx)}
-                        alt=""
-                        className={`h-24 md:h-32 rounded-lg object-cover border border-white/20 shadow-xl opacity-90 ${
-                          isLatest ? "animate-join-ring" : "mr-3"
-                        }`}
-                      />
-                    );
-                  })
-                )}
+                {poppedUpIndices.map((idx) => {
+                  const isLatest = idx === poppedUpIndices[poppedUpIndices.length - 1];
+                  return (
+                    <img
+                      key={idx}
+                      src={photoSrc(idx)}
+                      alt=""
+                      className={`h-24 md:h-32 rounded-lg object-cover border border-white/20 shadow-xl opacity-90 ${
+                        isLatest ? "animate-join-ring" : "mr-4"
+                      }`}
+                      style={{
+                        width: "160px",
+                      }}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}
@@ -361,12 +414,6 @@ export default function StageEngine({
         }
         .animate-photo-in { animation: photoIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
-        @keyframes marquee {
-          from { transform: translateX(0); }
-          to   { transform: translateX(-50%); }
-        }
-        .animate-marquee { animation: marquee linear infinite; }
-
         @keyframes joinRing {
           0% {
             opacity: 0;
@@ -377,14 +424,14 @@ export default function StageEngine({
           }
           50% {
             opacity: 0.5;
-            max-width: 320px;
-            margin-right: 12px;
+            max-width: 160px;
+            margin-right: 16px;
           }
           100% {
-            opacity: 0.9;
+            opacity: 0.95;
             transform: scale(1) translateY(0) rotate(0deg);
-            max-width: 320px;
-            margin-right: 12px;
+            max-width: 160px;
+            margin-right: 16px;
             filter: brightness(1) blur(0);
           }
         }
