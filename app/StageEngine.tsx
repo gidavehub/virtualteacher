@@ -51,7 +51,6 @@ export default function StageEngine({
 
   // ── Photo overlay state ──
   const [photoIdx, setPhotoIdx] = useState(-1); // index currently "in front"
-  const [docked, setDocked] = useState<number[]>([]); // indices docked behind
   const photoTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const frontTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -64,7 +63,6 @@ export default function StageEngine({
     photoTimer.current = null;
     frontTimer.current = null;
     setPhotoIdx(-1);
-    setDocked([]);
   }, []);
 
   // ── Base layer: the empty classroom (first frame of clip 1), loaded once ──
@@ -205,10 +203,9 @@ export default function StageEngine({
       const show = () => {
         const current = order[i % count];
         setPhotoIdx(current);
-        // After a beat "in front", dock it to the background strip.
+        // Hold "in front" for a beat, then fade back to the scrolling ring.
         frontTimer.current = setTimeout(() => {
           setPhotoIdx(-1);
-          setDocked((d) => [...d.filter((x) => x !== current), current].slice(-6));
         }, Math.min(3000, interval * 0.45));
         i += 1;
       };
@@ -302,21 +299,33 @@ export default function StageEngine({
       <video ref={bufARef} onEnded={handleEnded("A")} className={bufClass("A")} playsInline />
       <video ref={bufBRef} onEnded={handleEnded("B")} className={bufClass("B")} playsInline />
 
-      {/* ── Photo overlay: big in front briefly, then docked one by one ── */}
-      {session?.photoFolder && (docked.length > 0 || frontVisible) && (
+      {/* ── Photo overlay: an infinite scrolling ring of the whole gallery
+             along the top, plus the featured photo big in front ── */}
+      {session?.photoFolder && (session.photoCount ?? 0) > 0 && (
         <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
-          {/* Docked strip along the top */}
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex gap-3 items-center">
-            {docked.map((i) => (
-              <img
-                key={i}
-                src={photoSrc(i)}
-                alt=""
-                className="h-24 md:h-32 rounded-lg object-cover border border-white/20 shadow-xl opacity-90 animate-dock-in"
-              />
-            ))}
+          {/* Infinite scroll ring — the full pool glides by continuously;
+              the sequence is doubled so the loop is seamless */}
+          <div className="absolute top-6 left-0 right-0 overflow-hidden">
+            <div
+              className="flex items-center w-max animate-marquee"
+              style={{
+                animationDuration: `${Math.max(30, session.photoCount * 3.5)}s`,
+                animationPlayState: session.paused ? "paused" : "running",
+              }}
+            >
+              {[0, 1].map((rep) =>
+                Array.from({ length: session.photoCount }, (_, i) => (
+                  <img
+                    key={`${rep}-${i}`}
+                    src={photoSrc(i)}
+                    alt=""
+                    className="h-24 md:h-32 mr-3 rounded-lg object-cover border border-white/20 shadow-xl opacity-90"
+                  />
+                ))
+              )}
+            </div>
           </div>
-          {/* Current photo — big, in front of Rohey, fades out as it docks */}
+          {/* Featured photo — big, in front of Rohey, fades back into the ring */}
           <div
             className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ease-out ${
               frontVisible ? "opacity-100 scale-100" : "opacity-0 scale-[0.92]"
@@ -339,11 +348,11 @@ export default function StageEngine({
         }
         .animate-photo-in { animation: photoIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
-        @keyframes dockIn {
-          from { opacity: 0; transform: translateY(-14px) scale(1.08); }
-          to   { opacity: 0.9; transform: translateY(0) scale(1); }
+        @keyframes marquee {
+          from { transform: translateX(0); }
+          to   { transform: translateX(-50%); }
         }
-        .animate-dock-in { animation: dockIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .animate-marquee { animation: marquee linear infinite; }
       ` }} />
     </div>
   );
