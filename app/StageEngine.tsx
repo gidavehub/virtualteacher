@@ -51,6 +51,7 @@ export default function StageEngine({
 
   // ── Photo overlay state ──
   const [photoIdx, setPhotoIdx] = useState(-1); // index currently "in front"
+  const [poppedUpIndices, setPoppedUpIndices] = useState<number[]>([]);
   const photoTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const frontTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -63,6 +64,7 @@ export default function StageEngine({
     photoTimer.current = null;
     frontTimer.current = null;
     setPhotoIdx(-1);
+    setPoppedUpIndices([]);
   }, []);
 
   // ── Base layer: the empty classroom (first frame of clip 1), loaded once ──
@@ -203,6 +205,10 @@ export default function StageEngine({
       const show = () => {
         const current = order[i % count];
         setPhotoIdx(current);
+        setPoppedUpIndices((prev) => {
+          if (prev.includes(current)) return prev;
+          return [...prev, current];
+        });
         // Hold "in front" for a beat, then fade back to the scrolling ring.
         frontTimer.current = setTimeout(() => {
           setPhotoIdx(-1);
@@ -305,26 +311,28 @@ export default function StageEngine({
         <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
           {/* Infinite scroll ring — the full pool glides by continuously;
               the sequence is doubled so the loop is seamless */}
-          <div className="absolute top-6 left-0 right-0 overflow-hidden">
-            <div
-              className="flex items-center w-max animate-marquee"
-              style={{
-                animationDuration: `${Math.max(30, session.photoCount * 3.5)}s`,
-                animationPlayState: session.paused ? "paused" : "running",
-              }}
-            >
-              {[0, 1].map((rep) =>
-                Array.from({ length: session.photoCount }, (_, i) => (
-                  <img
-                    key={`${rep}-${i}`}
-                    src={photoSrc(i)}
-                    alt=""
-                    className="h-24 md:h-32 mr-3 rounded-lg object-cover border border-white/20 shadow-xl opacity-90"
-                  />
-                ))
-              )}
+          {poppedUpIndices.length > 0 && (
+            <div className="absolute top-6 left-0 right-0 overflow-hidden">
+              <div
+                className="flex items-center w-max animate-marquee"
+                style={{
+                  animationDuration: `${Math.max(30, poppedUpIndices.length * 3.5)}s`,
+                  animationPlayState: session.paused ? "paused" : "running",
+                }}
+              >
+                {[0, 1].map((rep) =>
+                  poppedUpIndices.map((idx) => (
+                    <img
+                      key={`${rep}-${idx}`}
+                      src={photoSrc(idx)}
+                      alt=""
+                      className="h-24 md:h-32 mr-3 rounded-lg object-cover border border-white/20 shadow-xl opacity-90"
+                    />
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+          )}
           {/* Featured photo — big, in front of Rohey, fades back into the ring */}
           <div
             className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ease-out ${
