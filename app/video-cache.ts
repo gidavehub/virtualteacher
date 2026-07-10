@@ -6,12 +6,10 @@ export const CACHE_NAME = "vftp-video-cache-v2";
 // The 36 final v2 clips (audio baked in) to cache for offline playback
 export const CLIPS_TO_CACHE = Array.from({ length: 36 }, (_, i) => i + 1);
 
-// The site-visit photo sets shown during the Giga story — cached alongside
-// the clips so the whole show (video + gallery) runs offline, zero buffering.
+// The site-visit photos shown during the Giga story — one pooled set, cached
+// alongside the clips so the whole show runs offline, zero buffering.
 export const PHOTO_SETS: { folder: string; count: number }[] = [
-  { folder: "sierra-leone", count: 3 },
-  { folder: "kenya", count: 1 },
-  { folder: "gambia", count: 12 },
+  { folder: "all", count: 16 },
 ];
 
 const GCS_BASE = "https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app";

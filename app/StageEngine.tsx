@@ -194,18 +194,21 @@ export default function StageEngine({
     const startCycle = () => {
       const dur = isFinite(cur.duration) && cur.duration > 0 ? cur.duration : count * 6;
       const interval = Math.max(4000, Math.min(9000, (dur * 1000) / (count + 1)));
+      // One pooled gallery — shuffle the order every scene and keep rotating
+      // through all of them for as long as the clip runs.
+      const order = Array.from({ length: count }, (_, k) => k);
+      for (let k = order.length - 1; k > 0; k--) {
+        const j = Math.floor(Math.random() * (k + 1));
+        [order[k], order[j]] = [order[j], order[k]];
+      }
       let i = 0;
       const show = () => {
-        if (i >= count) {
-          if (photoTimer.current) clearInterval(photoTimer.current);
-          return;
-        }
-        const current = i;
+        const current = order[i % count];
         setPhotoIdx(current);
         // After a beat "in front", dock it to the background strip.
         frontTimer.current = setTimeout(() => {
           setPhotoIdx(-1);
-          setDocked((d) => [...d, current].slice(-6));
+          setDocked((d) => [...d.filter((x) => x !== current), current].slice(-6));
         }, Math.min(3000, interval * 0.45));
         i += 1;
       };
@@ -278,10 +281,6 @@ export default function StageEngine({
   if (photoIdx >= 0) lastFrontIdx.current = photoIdx;
   const frontVisible = photoIdx >= 0;
 
-  // Gentle alternating tilts — the docked strip reads like polaroids pinned
-  // along the top of the frame, not a rigid filmstrip.
-  const DOCK_TILT = [-5, 3.5, -2.5, 4.5, -3.5, 2.5];
-
   const bufClass = (mine: "A" | "B") =>
     `absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
       activeBuf === mine ? "opacity-100" : "opacity-0"
@@ -303,79 +302,48 @@ export default function StageEngine({
       <video ref={bufARef} onEnded={handleEnded("A")} className={bufClass("A")} playsInline />
       <video ref={bufBRef} onEnded={handleEnded("B")} className={bufClass("B")} playsInline />
 
-      {/* ── Photo overlay: a polaroid presented in front of Rohey, then
-             pinned into a gallery along the top — one by one ── */}
+      {/* ── Photo overlay: big in front briefly, then docked one by one ── */}
       {session?.photoFolder && (docked.length > 0 || frontVisible) && (
         <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
-          {/* Soft vignette behind the featured photo so it glows over the
-              scene without hiding Rohey */}
-          <div
-            className={`absolute inset-0 transition-opacity duration-700 ${
-              frontVisible ? "opacity-100" : "opacity-0"
-            }`}
-            style={{
-              background:
-                "radial-gradient(ellipse at center, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.25) 45%, rgba(0,0,0,0) 75%)",
-            }}
-          />
-
-          {/* Docked gallery — tilted polaroids pinned along the top */}
-          <div className="absolute top-5 md:top-8 left-1/2 -translate-x-1/2 flex items-start">
-            {docked.map((i, k) => (
-              <div
+          {/* Docked strip along the top */}
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex gap-3 items-center">
+            {docked.map((i) => (
+              <img
                 key={i}
-                className="-ml-3 first:ml-0"
-                style={{
-                  transform: `rotate(${DOCK_TILT[k % DOCK_TILT.length]}deg)`,
-                  zIndex: k,
-                }}
-              >
-                <div className="animate-dock-in bg-white p-1 md:p-1.5 pb-2 md:pb-3 rounded-[4px] shadow-[0_10px_30px_rgba(0,0,0,0.55)]">
-                  <img
-                    src={photoSrc(i)}
-                    alt=""
-                    className="h-20 md:h-28 max-w-[180px] object-cover rounded-[2px]"
-                  />
-                </div>
-              </div>
+                src={photoSrc(i)}
+                alt=""
+                className="h-24 md:h-32 rounded-lg object-cover border border-white/20 shadow-xl opacity-90 animate-dock-in"
+              />
             ))}
           </div>
-
-          {/* Featured photo — presented big in front, then fades away as it
-              takes its place in the gallery */}
+          {/* Current photo — big, in front of Rohey, fades out as it docks */}
           <div
             className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ease-out ${
-              frontVisible ? "opacity-100 scale-100" : "opacity-0 scale-[0.88]"
+              frontVisible ? "opacity-100 scale-100" : "opacity-0 scale-[0.92]"
             }`}
           >
-            <div
+            <img
               key={frontVisible ? photoIdx : lastFrontIdx.current}
-              className="bg-white p-2 md:p-3 pb-6 md:pb-9 rounded-md shadow-[0_40px_120px_rgba(0,0,0,0.75)] rotate-[-1.2deg] animate-photo-in"
-            >
-              <img
-                src={photoSrc(frontVisible ? photoIdx : lastFrontIdx.current)}
-                alt=""
-                className="max-w-[56vw] max-h-[56vh] object-contain rounded-[3px]"
-              />
-            </div>
+              src={photoSrc(frontVisible ? photoIdx : lastFrontIdx.current)}
+              alt=""
+              className="max-w-[62%] max-h-[68%] rounded-2xl object-contain border border-white/25 shadow-[0_30px_80px_rgba(0,0,0,0.7)] animate-photo-in"
+            />
           </div>
         </div>
       )}
 
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes photoIn {
-          from { opacity: 0; transform: scale(0.9) translateY(22px) rotate(-3deg); }
-          to   { opacity: 1; transform: scale(1) translateY(0) rotate(-1.2deg); }
+          from { opacity: 0; transform: scale(0.92) translateY(14px); }
+          to   { opacity: 1; transform: scale(1) translateY(0); }
         }
-        .animate-photo-in { animation: photoIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .animate-photo-in { animation: photoIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
         @keyframes dockIn {
-          from { opacity: 0; transform: translateY(-18px) scale(1.12); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
+          from { opacity: 0; transform: translateY(-14px) scale(1.08); }
+          to   { opacity: 0.9; transform: translateY(0) scale(1); }
         }
-        .animate-dock-in {
-          animation: dockIn 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
+        .animate-dock-in { animation: dockIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
       ` }} />
     </div>
   );
