@@ -1,0 +1,31 @@
+BUDGET REVISION REPORT: AI VIRTUAL TEACHER ROHEY
+PROJECT: UNICEF DINNER PRESENTATION
+
+1. EXECUTIVE SUMMARY
+This report outlines a necessary adjustment to the project budget for the "AI Virtual Teacher Rohey" presentation. This revision is directly prompted by the delivery of a new set of reference audio files from the client team, which replaces the initial audio style with the finalized vocal tone and pacing requirements. Since the initial video assets were already successfully generated and finalized using the first set of audio resources provided, reproducing the entire sequence to match these newly specified style guidelines requires additional rendering credits. 
+
+To accommodate this complete regeneration, we propose a 65% increment specifically on the AI video generation cost line item. All other adjustments, such as layout alignment, asset positioning, and orchestration adjustments, will be managed internally by our development team at no additional cost.
+
+2. REASONS FOR BUDGET ADJUSTMENT
+The need to update the budget arises from a shift in the audio style specifications:
+* Revised Audio Delivery: The initial video production was successfully completed using the first audio files provided to us. However, as those did not fully align with the client's ultimate creative vision for Rohey's voice and style, a brand-new set of audio files has been delivered to replace them.
+* New Creative Guidelines: The newly delivered audio implements a distinct creative direction, featuring a more upbeat, brighter, and highly animated tone for Rohey.
+* Slower Pace and Pacing Guidelines: The new audio features a significantly slower speech rate with structured, minimum 1-second pauses between sentences (and longer pauses specified in production notes) to improve audience engagement.
+
+3. IMPACT ON VIDEO LENGTH AND RESOURCE CONSUMPTION
+Slowing down the speech rate and introducing systematic sentence-level pauses substantially increases the total duration (length) of the video segments. 
+* Credit Depletion: Video generation models are billed based on duration and complexity. The first set of videos has already been fully generated based on the initial audio tracks, which exhausted a significant portion of our initial credit allocation.
+* Carryover Credits: While we have a small balance of leftover credits that will be carried over into this next batch, it is insufficient to generate the updated, longer video sequences in their entirety.
+* Cost Efficiency: To maintain the premium quality of the presentation, we did not use standard consumer tools like HeyGen or CapCut. Instead, we are utilizing Optiq Studio. Optiq Studio delivers exceptionally high-quality, photorealistic results that match the reference frame perfectly, but its advanced models are highly resource-intensive and require additional credits.
+
+4. SCOPE OF CHANGES, ENGINEERING EFFORT & COST ALLOCATION
+To address these changes, we have categorized the feedback into credit-intensive and no-cost adjustments:
+* Credit-Intensive Adjustments (Requires 65% AI Budget Increment): All tasks involving new video generation with slowed speech, extended pause timings, and new vocal pacing.
+* No-Cost Engineering and Integration (0% Extra Development Fees): 
+  - Over 52 hours of dedicated, intensive engineering, testing, and optimization work went into building and refining the custom real-time Next.js and Firebase (WebSocket-enabled) orchestration system. This significant integration effort is provided at a fixed cost and will not incur any additional development or integration fees.
+  - Several requested visual and layout corrections will be resolved directly on our end without consuming video credits or adding external costs. These include picture overlays, logo repositioning, and brand material placement on the console and screen.
+
+For more granular details on the system architecture, self-hosted GAN model evaluations, and the low-latency websocket synchronization stack, please refer to the accompanying TECHNICAL_ARCHITECTURE_REPORT.txt.
+
+5. PROPOSED RESOLUTION
+We request an immediate approval of a 65% increment applied strictly to the AI/Video Generation cost category to purchase the required credits. Securing these credits promptly will allow us to proceed with generating the new batch of high-quality videos using Optiq Studio and keep the project on track for the UNICEF dinner event.

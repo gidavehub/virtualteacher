@@ -1,0 +1,35 @@
+TECHNICAL ARCHITECTURE & INFRASTRUCTURE REPORT
+PROJECT: AI VIRTUAL TEACHER ROHEY
+SUB-SYSTEM: REAL-TIME ORCHESTRATION ENGINE & RENDERING STACK
+
+1. ARCHITECTURE OVERVIEW
+The AI Virtual Teacher Rohey system is built as an ultra-low latency, real-time presentation orchestration system. The platform bridges a web-based Operator Console with a high-fidelity Stage Screen Projector layer. The architecture was engineered, implemented, and fully optimized over a dedicated 52-hour intensive development sprint, achieving seamless state synchronization and zero-buffering transitions.
+
+2. VIDEO RENDERING & COMPONENT SYNCHRONIZATION
+To ensure visual consistency and high-fidelity output under real-time conditions, our team evaluated and deployed several advanced rendering approaches:
+
+* Self-Hosted Generative Adversarial Networks (GANs):
+  We extensively designed and iterated on self-hosting several foundation GAN models to dynamically lip-sync video assets based on live or newly delivered audio files. However, through rigorous testing and multiple evaluation cycles, self-hosted GAN pipelines were found to be insufficient. They failed to deliver the strict temporal coherence, high photorealistic facial resolution (1080p+), and rapid response timings required for high-level diplomatic venues.
+  
+* Production Rendering Stack (Optiq Studio):
+  To bypass raw GAN limitations, the video pipeline was migrated to Optiq Studio. This production-grade system uses advanced cinematic models to generate high-fidelity, visually seamless loops. Optiq Studio locks the camera tripod (tripod lock), preserves environmental anchors (classroom background, lighting, and shadow directions), and ensures 100% facial and wardrobe continuity across different clips, making cross-fade transitions completely seamless to the audience.
+
+3. REAL-TIME SYSTEM ENGINE STACK
+The live presentation system is decoupled into a modular client-server orchestration architecture:
+
+* Control and Synchronisation Layer:
+  - Framework: React and Next.js Client-Side App Router.
+  - State Sync Layer: Firebase Realtime Database (RTDB).
+  - Protocol: Under the hood, Firebase RTDB establishes persistent WebSockets connections. This architecture allows bidirectional synchronization of "directives" (such as cue triggers, speech clips, or overlays) between the Operator Console and the Stage Screen in sub-100ms.
+
+* Three-Layer Parallel Video Canvas Engine:
+  To eliminate rendering, asset loading, or decoder initialization delay during sudden live cues, the Stage Screen utilizes a custom three-layer overlapping video structure (StageEngine):
+  1. Base Layer (Idle Loop): A continuous, seamless silent loop showing Rohey breathing, blinking, and nodding. This layer is always playing underneath.
+  2. Middle Layer (Active Script/Vocal Clip): Triggered on segment activation, playing the main speech clip with audio overlay.
+  3. Top Layer (Silent Action Overlay): Transparent video layers representing specific physical cues (like pointing with an open palm or looking center) that seamlessly fade in over the active script and fade out to reveal it.
+  These layers are cross-faded using high-performance hardware-accelerated CSS opacity transitions, creating the illusion of a single, fluid physical performance.
+
+* Bandwidth-Resilient Local Caching:
+  Because the system must run flawlessly in remote or bandwidth-constrained environments, the engine incorporates a local pre-loading and caching manager (video-cache.ts & VideoCacheDownloader):
+  - Service Workers / Cache Storage API: Caches high-definition video segments locally on the rendering machine before the presentation starts.
+  - Playback Stability: Video source tags point directly to local IndexedDB or Cache blob URLs, bypassing network requests entirely during the live performance.

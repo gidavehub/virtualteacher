@@ -1,425 +1,360 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { CLIP, IDLE_CLIP } from "./show-timeline";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { StepDirective } from "./show-timeline";
 import { getClipUrl } from "./video-cache";
 
-export interface Directive {
-  started: boolean;
-  mode: "idle" | "segment" | "freeze";
-  stepIndex: number;
-  mainClip: number | null;
-  overlayClip: number | null;
-  audioDelayMs: number;
-  endAlign?: boolean; // delay the shorter of main/overlay so both clips end together
-  caption: string;
-  token: number;
-  updatedAt?: number;
-  paused?: boolean;
-}
+// Back-compat alias — operator/stage import this name.
+export type Directive = StepDirective;
 
 interface Props {
-  session: Directive | null;
+  session: StepDirective | null;
   active: boolean; // audio unlocked / preview running
-  muted: boolean; // stage: user-controlled; operator: always true
+  muted: boolean; // stage: user-controlled; operator preview: always true
+  preloadClip?: number | null; // the NEXT scene's clip — loaded into the spare buffer ahead of time
   onProgress?: (currentTime: number, duration: number, playing: boolean) => void;
-  onContentEnded?: (token: number) => void; // content finished → caller advances or idles (token = the directive that ended)
+  onContentEnded?: (token: number) => void; // clip finished (non-freeze) → caller advances or idles
 }
 
-// The 3-layer video engine: idle loop (bottom) · main script w/ audio · silent
-// action overlay (top). Overlays fade in over the script and fade out to reveal
-// it; the walk-out "freeze" holds its last frame (empty room).
+// ── The v2 engine ──────────────────────────────────────────────────────────
+// Clips are final self-contained files (audio baked in). Layers:
+//   1. BASE (bottom) — clip 1 held on its very first frame: the empty
+//      classroom before Rohey walks in. This is the default screen (before
+//      the show starts and behind every fade) — never the nodding loop.
+//   2. two clip buffers (A/B) that alternate per scene so consecutive clips
+//      CROSS-FADE into each other instead of hard-cutting. During the live
+//      discussions the idle-nod loop plays IN a buffer like any other scene,
+//      so it enters and leaves through the same seamless fade.
+//   3. photo overlay (top) — site-visit photos: big in front briefly, then
+//      docked to a background strip, one by one.
+// freeze mode holds the clip's last frame (walk-outs, the closing card) and
+// the next scene cross-fades straight over it — nothing in between.
+// PAUSE freezes the current frame in place. No scene swap.
 export default function StageEngine({
   session,
   active,
   muted,
+  preloadClip = null,
   onProgress,
   onContentEnded,
 }: Props) {
-  const idleRef = useRef<HTMLVideoElement>(null);
-  const mainRef = useRef<HTMLVideoElement>(null);
-  const overlayRef = useRef<HTMLVideoElement>(null);
+  const baseRef = useRef<HTMLVideoElement>(null);
+  const bufARef = useRef<HTMLVideoElement>(null);
+  const bufBRef = useRef<HTMLVideoElement>(null);
 
-  const [overlayVisible, setOverlayVisible] = useState(false);
-  const [mainVisible, setMainVisible] = useState(false);
-  const [mapOverlayVisible, setMapOverlayVisible] = useState(false);
+  // Which buffer currently carries the active scene: "A" | "B" | null (base).
+  const [activeBuf, setActiveBuf] = useState<"A" | "B" | null>(null);
+  const activeBufRef = useRef<"A" | "B" | null>(null);
+  activeBufRef.current = activeBuf;
 
   const lastToken = useRef<number>(-1);
-  const audioTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const alignCleanup = useRef<(() => void)[]>([]);
-  const prevPaused = useRef<boolean | undefined>(undefined);
 
-  // React to a new directive.
+  // ── Photo overlay state ──
+  const [photoIdx, setPhotoIdx] = useState(-1); // index currently "in front"
+  const [docked, setDocked] = useState<number[]>([]); // indices docked behind
+  const photoTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const frontTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const bufEl = (which: "A" | "B" | null) =>
+    which === "A" ? bufARef.current : which === "B" ? bufBRef.current : null;
+
+  const stopPhotos = useCallback(() => {
+    if (photoTimer.current) clearInterval(photoTimer.current);
+    if (frontTimer.current) clearTimeout(frontTimer.current);
+    photoTimer.current = null;
+    frontTimer.current = null;
+    setPhotoIdx(-1);
+    setDocked([]);
+  }, []);
+
+  // ── Base layer: the empty classroom (first frame of clip 1), loaded once ──
+  useEffect(() => {
+    if (!active) return;
+    const base = baseRef.current;
+    if (!base || base.src) return;
+    (async () => {
+      base.src = await getClipUrl(1);
+      base.load();
+      base.currentTime = 0;
+      base.muted = true;
+      base.pause(); // a still frame — never plays
+    })();
+  }, [active]);
+
+  // ── React to a new directive ──
   useEffect(() => {
     if (!active || !session) return;
     const changed = session.token !== lastToken.current;
     lastToken.current = session.token;
 
-    const idle = idleRef.current;
-    const main = mainRef.current;
-    const overlay = overlayRef.current;
+    async function apply() {
+      if (!session) return;
 
-    // Cancel pending delayed starts / end-align listeners. Only on an actual
-    // directive change (or drop to idle) — the session poll re-runs this
-    // effect every few hundred ms and must NOT kill a pending audio-delay
-    // timer mid-wait.
-    const cancelScheduled = () => {
-      if (audioTimer.current) {
-        clearTimeout(audioTimer.current);
-        audioTimer.current = null;
-      }
-      alignCleanup.current.forEach((fn) => fn());
-      alignCleanup.current = [];
-    };
-    if (changed) {
-      setMapOverlayVisible(false);
-      cancelScheduled();
-    }
+      // What should be on screen for this directive?
+      //  · not started      → nothing (base empty classroom shows)
+      //  · mode "idle"      → the act's idle-nod loop (live discussions)
+      //  · segment / freeze → the scene clip
+      const targetClip = !session.started
+        ? null
+        : session.mode === "idle"
+          ? session.idleClip
+          : session.clip;
 
-    async function loadAssets() {
-      // Idle loop keeps running underneath.
-      if (idle) {
-        const idleSrc = await getClipUrl(IDLE_CLIP);
-        if (idle.src !== idleSrc) {
-          idle.src = idleSrc;
-          idle.load();
-        }
-        idle.muted = true;
-        idle.play().catch(() => {});
-      }
-
-      // Wait on standby if show hasn't started, or in idle mode.
-      if (!session || !session.started || session.mode === "idle") {
-        cancelScheduled();
-        setOverlayVisible(false);
-        setMainVisible(false);
-        main?.pause();
-        overlay?.pause();
+      if (targetClip == null) {
+        const cur = bufEl(activeBufRef.current);
+        cur?.pause();
+        setActiveBuf(null);
+        stopPhotos();
         return;
       }
 
       if (!changed) return;
 
-      const endAlign =
-        !!session.endAlign && session.mainClip != null && session.overlayClip != null;
+      // New scene: load into the INACTIVE buffer and cross-fade over the
+      // current one (or over the base / a frozen last frame).
+      stopPhotos();
+      const next: "A" | "B" = activeBufRef.current === "A" ? "B" : "A";
+      const nextEl = bufEl(next);
+      const prevEl = bufEl(activeBufRef.current);
+      if (!nextEl) return;
 
-      // Main (audio) clip.
-      let startMain: (() => void) | null = null;
-      if (main) {
-        if (session.mainClip != null) {
-          const src = await getClipUrl(session.mainClip);
-          if (main.src !== src) {
-            main.src = src;
-            main.load();
-          }
-          main.currentTime = 0;
-          main.muted = muted;
-          main.volume = 1.0;
-          startMain = () => {
-            main.muted = muted;
-            main.volume = 1.0;
-            main.play().catch(() => {});
-
-            // Cross-fade immediately if her speech starts under an overlay
-            // (walk-in delay, simultaneous play, or end-aligned steps) — the overlay stays on top.
-            if (endAlign) {
-              setMainVisible(true);
-            } else if (session.audioDelayMs && session.overlayClip != null) {
-              setMainVisible(true);
-            } else if (session.overlayClip == null) {
-              setMainVisible(true);
-            } else {
-              // Simultaneous play from the start
-              setMainVisible(true);
-            }
-          };
-          if (endAlign) {
-            // Start order is decided below once both clip durations are known.
-            setMainVisible(false);
-          } else if (session.audioDelayMs && session.overlayClip != null) {
-            setMainVisible(false);
-            audioTimer.current = setTimeout(startMain, session.audioDelayMs);
-          } else {
-            startMain();
-          }
-        } else {
-          main.pause();
-          setMainVisible(false);
-        }
+      const src = await getClipUrl(targetClip);
+      if (nextEl.src !== src) {
+        nextEl.src = src;
+        nextEl.load();
       }
+      nextEl.currentTime = 0;
+      nextEl.loop = session.mode === "idle"; // idle nod loops seamlessly
+      nextEl.muted = session.mode === "idle" ? true : muted;
+      nextEl.volume = 1.0;
+      if (!session.paused) nextEl.play().catch(() => {});
+      setActiveBuf(next);
 
-      // Overlay (silent action) clip.
-      if (overlay) {
-        if (session.overlayClip != null) {
-          const src = await getClipUrl(session.overlayClip);
-          if (overlay.src !== src) {
-            overlay.src = src;
-            overlay.load();
-          }
-          overlay.currentTime = 0;
-          overlay.muted = true;
-          overlay.volume = 0;
-          if (endAlign) {
-            // Start order is decided below once both clip durations are known.
-            setOverlayVisible(false);
-          } else {
-            overlay.play().catch(() => {});
-            setOverlayVisible(true);
-          }
-        } else {
-          overlay.pause();
-          setOverlayVisible(false);
-        }
-      }
-
-      // End-aligned steps: the longer clip starts now; the shorter one starts
-      // once the leader reaches (leaderDuration − followerDuration), so both
-      // clips END together. The trigger rides on timeupdate rather than a
-      // timer, so pausing the show pauses the countdown too.
-      if (endAlign && main && overlay && startMain) {
-        const start = startMain;
-        const begin = () => {
-          const mainDur = main.duration;
-          const overlayDur = overlay.duration;
-          if (!isFinite(mainDur) || mainDur <= 0 || !isFinite(overlayDur) || overlayDur <= 0) {
-            return false;
-          }
-          const overlayLeads = overlayDur >= mainDur;
-          const leader = overlayLeads ? overlay : main;
-          const followerDelay = Math.abs(overlayDur - mainDur);
-          if (overlayLeads) {
-            overlay.play().catch(() => {});
-            setOverlayVisible(true);
-          } else {
-            start();
-          }
-          const onTime = () => {
-            if (leader.currentTime >= followerDelay) {
-              leader.removeEventListener("timeupdate", onTime);
-              if (overlayLeads) {
-                start();
-              } else {
-                overlay.play().catch(() => {});
-                setOverlayVisible(true);
-              }
-            }
-          };
-          leader.addEventListener("timeupdate", onTime);
-          alignCleanup.current.push(() => leader.removeEventListener("timeupdate", onTime));
-          return true;
-        };
-        if (!begin()) {
-          // Durations not known yet — wait for both clips' metadata.
-          let started = false;
-          const onMeta = () => {
-            if (!started && begin()) {
-              started = true;
-              cleanup();
-            }
-          };
-          const cleanup = () => {
-            main.removeEventListener("loadedmetadata", onMeta);
-            overlay.removeEventListener("loadedmetadata", onMeta);
-            main.removeEventListener("durationchange", onMeta);
-            overlay.removeEventListener("durationchange", onMeta);
-            if (fallbackInterval) clearInterval(fallbackInterval);
-          };
-          main.addEventListener("loadedmetadata", onMeta);
-          overlay.addEventListener("loadedmetadata", onMeta);
-          main.addEventListener("durationchange", onMeta);
-          overlay.addEventListener("durationchange", onMeta);
-
-          const fallbackInterval = setInterval(() => {
-            if (!started && begin()) {
-              started = true;
-              cleanup();
-            }
-          }, 100);
-
-          // Clear fallback check after 5 seconds to prevent leak
-          setTimeout(() => clearInterval(fallbackInterval), 5000);
-
-          alignCleanup.current.push(cleanup);
-        }
+      // Let the old buffer finish its fade-out, then silence it.
+      if (prevEl && prevEl !== nextEl) {
+        setTimeout(() => {
+          prevEl.pause();
+        }, 750);
       }
     }
 
-    loadAssets();
-  }, [session, active, muted]);
+    apply();
+  }, [session, active, muted, stopPhotos]);
 
-  // Dedicated Play / Pause Effect reacting to session state pause changes.
+  // ── Preload the NEXT scene into the spare buffer while this one plays ──
+  // apply() finds the src already set and starts it instantly — no stall at
+  // the start of the next video, even on slow networks.
+  useEffect(() => {
+    if (!active || preloadClip == null) return;
+    const t = setTimeout(async () => {
+      const spare: "A" | "B" = activeBufRef.current === "A" ? "B" : "A";
+      const el = bufEl(spare);
+      if (!el || activeBufRef.current === null) return;
+      const src = await getClipUrl(preloadClip);
+      if (el.src !== src) {
+        el.pause();
+        el.src = src;
+        el.load();
+      }
+    }, 900); // let the crossfade finish before touching the spare buffer
+    return () => clearTimeout(t);
+  }, [session?.token, preloadClip, active]);
+
+  // ── Pause / resume: freeze exactly where it is — no scene swap ──
   useEffect(() => {
     if (!active || !session) return;
-    const isPaused = !!session.paused;
-    const wasPaused = prevPaused.current;
-    prevPaused.current = isPaused;
-
-    const idle = idleRef.current;
-    const main = mainRef.current;
-    const overlay = overlayRef.current;
-
-    if (isPaused) {
-      if (audioTimer.current) {
-        clearTimeout(audioTimer.current);
-        audioTimer.current = null;
-      }
-      idle?.pause();
-      main?.pause();
-      overlay?.pause();
-    } else {
-      // NOTE: never call play() on a video whose `ended` flag is set — play()
-      // on an ended element restarts it from 0. That replayed the walk-out
-      // clip a second time while it was frozen on the empty-room frame.
-      if (wasPaused === true) {
-        // We are resuming from an explicit paused state
-        if (idle && !overlayVisible && !mainVisible) {
-          idle.play().catch(() => {});
-        }
-        if (main && session.mainClip != null && !mainVisible && overlayVisible && !session.endAlign && !main.ended) {
-          // If main is not visible yet but should be, and overlay is active, start speech immediately on resume.
-          main.muted = muted;
-          main.volume = 1.0;
-          main.play().catch(() => {});
-          setOverlayVisible(false);
-          setMainVisible(true);
-        } else if (main && mainVisible && !main.ended) {
-          main.play().catch(() => {});
-        }
-        if (overlay && overlayVisible && !overlay.ended) {
-          overlay.play().catch(() => {});
-        }
-      } else {
-        // First start or non-resume playback sync
-        if (idle && !overlayVisible && !mainVisible) {
-          idle.play().catch(() => {});
-        }
-        if (main && mainVisible && !main.ended) {
-          main.play().catch(() => {});
-        }
-        if (overlay && overlayVisible && !overlay.ended) {
-          overlay.play().catch(() => {});
-        }
-      }
+    const cur = bufEl(activeBufRef.current);
+    if (!cur) return;
+    if (session.paused) {
+      cur.pause();
+      if (photoTimer.current) clearInterval(photoTimer.current);
+      photoTimer.current = null;
+    } else if (!cur.ended) {
+      cur.play().catch(() => {});
     }
-  }, [session?.paused, active, overlayVisible, mainVisible, muted, session?.mainClip, session?.stepIndex, session?.endAlign]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.paused, active]);
 
-  // Live mute changes.
+  // ── Live mute changes (idle-nod buffers stay muted — they're silent) ──
   useEffect(() => {
-    if (mainRef.current) {
-      mainRef.current.muted = muted;
-      mainRef.current.volume = 1.0;
-    }
-  }, [muted]);
+    const cur = bufEl(activeBufRef.current);
+    if (cur && !cur.loop) cur.muted = muted;
+  }, [muted, activeBuf]);
 
-  // Progress reporting from whichever clip is the "content" of this directive.
+  // ── Photo overlay cycle, timed across the clip's duration ──
   useEffect(() => {
-    const main = mainRef.current;
-    const overlay = overlayRef.current;
-    if (!onProgress) return;
+    if (!active || !session || session.mode !== "segment") return;
+    if (!session.photoFolder || session.photoCount <= 0) return;
+    if (session.token !== lastToken.current) return; // wait for apply()
 
-    const report = (v: HTMLVideoElement, isOverlay: boolean) => {
-      const preferredIsOverlay = session?.mainClip == null && session?.overlayClip != null;
-      if (preferredIsOverlay === isOverlay) {
-        onProgress(v.currentTime, v.duration || 0, !v.paused);
-      }
+    const cur = bufEl(activeBuf);
+    if (!cur || session.paused) return;
+
+    const count = session.photoCount;
+    const startCycle = () => {
+      const dur = isFinite(cur.duration) && cur.duration > 0 ? cur.duration : count * 6;
+      const interval = Math.max(4000, Math.min(9000, (dur * 1000) / (count + 1)));
+      let i = 0;
+      const show = () => {
+        if (i >= count) {
+          if (photoTimer.current) clearInterval(photoTimer.current);
+          return;
+        }
+        const current = i;
+        setPhotoIdx(current);
+        // After a beat "in front", dock it to the background strip.
+        frontTimer.current = setTimeout(() => {
+          setPhotoIdx(-1);
+          setDocked((d) => [...d, current].slice(-6));
+        }, Math.min(3000, interval * 0.45));
+        i += 1;
+      };
+      show();
+      photoTimer.current = setInterval(show, interval);
     };
 
-    const onMainTime = () => report(main!, false);
-    const onOverlayTime = () => report(overlay!, true);
-
-    if (main) main.addEventListener("timeupdate", onMainTime);
-    if (overlay) overlay.addEventListener("timeupdate", onOverlayTime);
+    if (isFinite(cur.duration) && cur.duration > 0) {
+      startCycle();
+    } else {
+      const onMeta = () => startCycle();
+      cur.addEventListener("loadedmetadata", onMeta, { once: true });
+      return () => cur.removeEventListener("loadedmetadata", onMeta);
+    }
 
     return () => {
-      if (main) main.removeEventListener("timeupdate", onMainTime);
-      if (overlay) overlay.removeEventListener("timeupdate", onOverlayTime);
+      if (photoTimer.current) clearInterval(photoTimer.current);
+      if (frontTimer.current) clearTimeout(frontTimer.current);
+      photoTimer.current = null;
+      frontTimer.current = null;
     };
-  }, [session, onProgress, overlayVisible, mainVisible]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.token, activeBuf, active, session?.paused]);
 
-  // Handle custom timeline triggers (like map image overlay at first 5s + 30s onwards)
+  // ── Progress reporting from the active buffer ──
   useEffect(() => {
-    const main = mainRef.current;
-    if (!main) return;
+    const cur = bufEl(activeBuf);
+    if (!cur || !onProgress) return;
+    const onTime = () => onProgress(cur.currentTime, cur.duration || 0, !cur.paused);
+    cur.addEventListener("timeupdate", onTime);
+    return () => cur.removeEventListener("timeupdate", onTime);
+  }, [activeBuf, onProgress]);
 
-    const handleCustomTriggers = () => {
-      // Giga Map step: the map image only appears from the 30-second mark of
-      // the speech onward — never at the start of the scene.
-      if (session?.mainClip === 4 && session?.overlayClip === 3) {
-        setMapOverlayVisible(main.currentTime >= 30.0);
-      } else {
-        setMapOverlayVisible(false);
-      }
-    };
-
-    main.addEventListener("timeupdate", handleCustomTriggers);
-    return () => main.removeEventListener("timeupdate", handleCustomTriggers);
-  }, [session]);
-
-  const handleOverlayEnded = () => {
-    if (session?.mode === "freeze") return; // hold the empty-room frame
-    setOverlayVisible(false);
-    
-    if (session?.mainClip != null) {
-      // simultaneous play: let the main clip continue playing underneath
-    } else {
-      // overlay-only content (point / write) is done
-      onContentEnded?.(lastToken.current);
-    }
-  };
-
-  const handleMainEnded = () => {
-    setMainVisible(false);
-    if (session?.mode === "freeze") return; // walk-out: hold the overlay's empty-room frame
-    setOverlayVisible(false);
-    setMapOverlayVisible(false);
+  // ── Clip finished ──
+  const handleEnded = (which: "A" | "B") => () => {
+    if (activeBufRef.current !== which) return; // stale buffer
+    if (!session) return;
+    if (session.mode === "freeze") return; // hold the last frame
+    if (session.mode === "idle") return; // looping nod never advances
     onContentEnded?.(lastToken.current);
   };
 
+  const photoSrc = (i: number) => `/photos/${session?.photoFolder}/${i + 1}.jpeg`;
+
+  // Remember the last photo shown "in front" so it can fade out gracefully
+  // instead of vanishing the instant it docks.
+  const lastFrontIdx = useRef(0);
+  if (photoIdx >= 0) lastFrontIdx.current = photoIdx;
+  const frontVisible = photoIdx >= 0;
+
+  // Gentle alternating tilts — the docked strip reads like polaroids pinned
+  // along the top of the frame, not a rigid filmstrip.
+  const DOCK_TILT = [-5, 3.5, -2.5, 4.5, -3.5, 2.5];
+
+  const bufClass = (mine: "A" | "B") =>
+    `absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
+      activeBuf === mine ? "opacity-100" : "opacity-0"
+    }`;
+
   return (
     <div className="absolute inset-0 bg-black">
-      {/* Idle loop stays fully opaque at the bottom of the stack — overlay and
-          main fades always reveal live video underneath, never black. */}
+      {/* Base: the empty classroom, first frame of clip 1 — the default
+          screen before the show and beneath every fade. Always opaque. */}
       <video
-        ref={idleRef}
+        ref={baseRef}
         className="absolute inset-0 w-full h-full object-cover"
         playsInline
-        loop
         muted
-      />
-      <video
-        ref={mainRef}
-        onEnded={handleMainEnded}
-        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
-          mainVisible ? "opacity-100" : "opacity-0"
-        }`}
-        playsInline
-      />
-      <video
-        ref={overlayRef}
-        onEnded={handleOverlayEnded}
-        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
-          overlayVisible ? "opacity-100" : "opacity-0"
-        }`}
-        playsInline
-        muted
+        preload="auto"
       />
 
-      {/* Map Image Overlay */}
-      {session?.stepIndex === 1 && (
-        <div
-          className={`absolute inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-40 transition-all duration-1000 ${
-            mapOverlayVisible ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95"
-          }`}
-        >
-          <div className="relative max-w-[90%] max-h-[90%] rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
-            <img
-              src="/media/giga-map.png"
-              alt="Giga Map Gambia"
-              className="w-full h-full object-contain max-h-[85vh]"
-            />
+      {/* Alternating scene buffers — consecutive scenes cross-fade. */}
+      <video ref={bufARef} onEnded={handleEnded("A")} className={bufClass("A")} playsInline />
+      <video ref={bufBRef} onEnded={handleEnded("B")} className={bufClass("B")} playsInline />
+
+      {/* ── Photo overlay: a polaroid presented in front of Rohey, then
+             pinned into a gallery along the top — one by one ── */}
+      {session?.photoFolder && (docked.length > 0 || frontVisible) && (
+        <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
+          {/* Soft vignette behind the featured photo so it glows over the
+              scene without hiding Rohey */}
+          <div
+            className={`absolute inset-0 transition-opacity duration-700 ${
+              frontVisible ? "opacity-100" : "opacity-0"
+            }`}
+            style={{
+              background:
+                "radial-gradient(ellipse at center, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.25) 45%, rgba(0,0,0,0) 75%)",
+            }}
+          />
+
+          {/* Docked gallery — tilted polaroids pinned along the top */}
+          <div className="absolute top-5 md:top-8 left-1/2 -translate-x-1/2 flex items-start">
+            {docked.map((i, k) => (
+              <div
+                key={i}
+                className="-ml-3 first:ml-0"
+                style={{
+                  transform: `rotate(${DOCK_TILT[k % DOCK_TILT.length]}deg)`,
+                  zIndex: k,
+                }}
+              >
+                <div className="animate-dock-in bg-white p-1 md:p-1.5 pb-2 md:pb-3 rounded-[4px] shadow-[0_10px_30px_rgba(0,0,0,0.55)]">
+                  <img
+                    src={photoSrc(i)}
+                    alt=""
+                    className="h-20 md:h-28 max-w-[180px] object-cover rounded-[2px]"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Featured photo — presented big in front, then fades away as it
+              takes its place in the gallery */}
+          <div
+            className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ease-out ${
+              frontVisible ? "opacity-100 scale-100" : "opacity-0 scale-[0.88]"
+            }`}
+          >
+            <div
+              key={frontVisible ? photoIdx : lastFrontIdx.current}
+              className="bg-white p-2 md:p-3 pb-6 md:pb-9 rounded-md shadow-[0_40px_120px_rgba(0,0,0,0.75)] rotate-[-1.2deg] animate-photo-in"
+            >
+              <img
+                src={photoSrc(frontVisible ? photoIdx : lastFrontIdx.current)}
+                alt=""
+                className="max-w-[56vw] max-h-[56vh] object-contain rounded-[3px]"
+              />
+            </div>
           </div>
         </div>
       )}
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes photoIn {
+          from { opacity: 0; transform: scale(0.9) translateY(22px) rotate(-3deg); }
+          to   { opacity: 1; transform: scale(1) translateY(0) rotate(-1.2deg); }
+        }
+        .animate-photo-in { animation: photoIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+        @keyframes dockIn {
+          from { opacity: 0; transform: translateY(-18px) scale(1.12); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .animate-dock-in {
+          animation: dockIn 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+      ` }} />
     </div>
   );
 }

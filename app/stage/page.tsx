@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Volume2, VolumeX, Maximize, Sparkles, Tv, Smartphone } from "lucide-react";
 import StageEngine from "../StageEngine";
-import { STEPS, Step, buildStepDirective, StepDirective } from "../show-timeline";
+import { STEPS, Step, buildStepDirective, getPreloadClip, StepDirective } from "../show-timeline";
 import { createStageSession, subscribeToSession, updateSessionState } from "../db-helpers";
 
 // Generates a clean 6-digit session pin
@@ -97,7 +97,13 @@ export default function StageProjection() {
 
     const unsubscribe = subscribeToSession(pin, (rtdbState) => {
       if (rtdbState) {
-        setSession(rtdbState);
+        // Never let a stale echo drag the stage backwards — the stage runs
+        // ahead of the sync layer by design.
+        setSession((prev) =>
+          prev && typeof rtdbState.token === "number" && rtdbState.token < prev.token
+            ? prev
+            : rtdbState
+        );
       }
     });
 
@@ -114,17 +120,29 @@ export default function StageProjection() {
     }
   }, [pin]);
 
-  // Self-healing state transition: when content ends, auto-advance flow on Stage Screen.
-  // Instantly pushes the next Step directive to Realtime Database.
+  // THE STAGE DRIVES THE SHOW. When a clip ends here, the next directive is
+  // applied LOCALLY first — playback continues instantly, no waiting on any
+  // sync round-trip — and only then pushed out so the operator catches up.
+  // The operator never advances the flow; it only interrupts (Next / Pause /
+  // gestures / Restart).
   const handleStageContentEnded = useCallback(
     (token: number) => {
       if (!session || session.token !== token) return;
+      if (session.mode !== "segment") return; // freeze holds; idle does nothing
       const cur = steps[session.stepIndex];
-      if (session.mode === "segment" && cur?.autoAdvance && session.stepIndex + 1 < steps.length) {
-        post(buildStepDirective(steps, session.stepIndex + 1, session.token + 1));
-      } else if (session.mode !== "freeze") {
-        post({ mode: "idle", mainClip: null, overlayClip: null });
+      let directive: StepDirective;
+      if (cur?.kind === "play" && cur.autoAdvance && session.stepIndex + 1 < steps.length) {
+        directive = buildStepDirective(steps, session.stepIndex + 1, session.token + 1);
+      } else {
+        // Gesture clip or a non-chained scene: settle back to the idle nod.
+        directive = {
+          ...buildStepDirective(steps, session.stepIndex, session.token + 1),
+          mode: "idle",
+          clip: null,
+        };
       }
+      setSession(directive); // play NOW — the stage can't wait for anyone
+      post(directive); // broadcast in the background; operator catches up
     },
     [post, session, steps]
   );
@@ -279,6 +297,7 @@ export default function StageProjection() {
             session={session}
             active={unlocked}
             muted={isMuted}
+            preloadClip={getPreloadClip(steps, session.stepIndex)}
             onContentEnded={handleStageContentEnded}
           />
         )}

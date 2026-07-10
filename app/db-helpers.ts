@@ -68,9 +68,10 @@ export async function createStageSession(pin: string): Promise<void> {
       started: false,
       mode: "idle",
       stepIndex: 0,
-      mainClip: null,
-      overlayClip: null,
-      audioDelayMs: 0,
+      clip: null,
+      idleClip: 14,
+      photoFolder: null,
+      photoCount: 0,
       caption: "",
       token: Date.now(),
       paused: false,
@@ -102,9 +103,10 @@ export async function createStageSession(pin: string): Promise<void> {
     started: false,
     mode: "idle",
     stepIndex: 0,
-    mainClip: null,
-    overlayClip: null,
-    audioDelayMs: 0,
+    clip: null,
+    idleClip: 14,
+    photoFolder: null,
+    photoCount: 0,
     caption: "",
     token: Date.now(),
     paused: false,
@@ -161,7 +163,7 @@ export async function updateSessionState(pin: string, state: Partial<StepDirecti
 
   // update() MERGES into the existing session node. set() would replace the
   // whole node with this partial (a lone { paused } post would wipe
-  // mainClip/token/etc. mid-show on the live network).
+  // clip/token/etc. mid-show on the live network).
   await update(rtdbRef, payload);
 }
 

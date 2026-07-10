@@ -1,17 +1,13 @@
 // Video caching manager using the browser's Cache Storage API.
 // Allows pre-downloading the entire 400MB show to run 100% offline with zero buffering.
 
-export const CACHE_NAME = "vftp-video-cache";
+export const CACHE_NAME = "vftp-video-cache-v2";
 
-// Generate the list of 27 video clip URLs to cache
-export const CLIPS_TO_CACHE = [
-  ...Array.from({ length: 25 }, (_, i) => i + 1),
-  5.5,
-  19.5
-];
+// The 36 final v2 clips (audio baked in) to cache for offline playback
+export const CLIPS_TO_CACHE = Array.from({ length: 36 }, (_, i) => i + 1);
 
 export function getGCSClipUrl(clipNum: number | string): string {
-  return `https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app/rohey-clips/${clipNum}.mp4`;
+  return `https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app/rohey-clips-v2/${clipNum}.mp4`;
 }
 
 export interface ProgressReport {

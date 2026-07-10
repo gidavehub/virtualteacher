@@ -1,274 +1,232 @@
-// ── The Rohey show timeline ──────────────────────────────────────────────
-// Clips live in /public/rohey-clips/{1..24}.mp4 and map 1:1 to the numbered
-// items in ROHEY_FULL_PRODUCTION_BREAKDOWN.md.
+// ── The Rohey show timeline (v2) ─────────────────────────────────────────
+// Clips are the FINAL edited files 1–36 (audio already baked in by Dave).
+// They live in GCS under rohey-clips-v2/ and locally in /public/rohey-clips-v2/.
 //
-// Two kinds of clips:
-//   • SCRIPT clip  → the avatar talking-head WITH audio (the part that matters).
-//   • ACTION clip  → a silent generated action (entrance, map, writing, point,
-//                    walk-out, idle loop). These are MUTED and layered on top
-//                    of the script clip, then fade out to reveal it.
+// Step kinds:
+//   • play    — one self-contained clip. autoAdvance chains straight into the
+//               next step; freeze holds the last frame instead of idling.
+//   • walkout — clip ends frozen on the empty classroom (break).
+//   • live    — Fatou voices Rohey on the mic. The stage holds the idle-nod
+//               loop; the operator has two tactile gestures: Invite (open
+//               palm) and Speak (silent mouth movement). No response options.
 //
-// The operator drives the show one Step at a time (the only button is "Next").
-// Steps default to the idle loop when they finish, EXCEPT steps flagged
-// autoAdvance — those flow straight into the next step with no idle gap.
-// Steps flagged endAlign delay the shorter of (main, overlay) so both clips
-// END together (e.g. the walk-out starts near the end of the break line).
+// Photo steps (18–20) carry a photoSet — the app overlays the site-visit
+// photos: each appears big in front of Rohey briefly, then docks to the
+// background, one by one. This is the only overlay the app does.
 
-export const CLIP = (n: number) => `https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app/rohey-clips/${n}.mp4`;
+export const CLIP = (n: number) =>
+  `https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app/rohey-clips-v2/${n}.mp4`;
 
-export const IDLE_CLIP = 10; // silent nodding / listening loop
+// Act idle loops (silent, slight nod, mouth still)
+export const IDLE_CLASSROOM = 14; // run-down classroom, question on board
+export const IDLE_CONNECTED = 29; // transformed classroom
 
-export type StepKind = "play" | "walkout" | "return" | "question" | "options";
+export type StepKind = "play" | "walkout" | "live";
 
-export interface StepOption {
-  clip: number; // script clip with audio
-  label: string; // short button label
-  guidance: string; // "if the guest said … pick this"
-  caption: string;
+export interface PhotoSet {
+  folder: string; // /public/photos/<folder>/1.jpeg..N.jpeg
+  count: number;
 }
 
 export interface Step {
   id: number;
-  label: string; // operator-facing step name
+  label: string;
   kind: StepKind;
-  main?: number; // audio-bearing script clip
-  overlay?: number; // silent action clip layered at the start
-  audioDelayMs?: number; // delay before the script/audio starts (entrances)
-  caption?: string; // subtitle shown on stage
-  pointClip?: number; // question steps: the "point at someone" clip
-  idleClip?: number; // question steps: which idle loop to hold
-  options?: StepOption[];
-  nextLabel?: string; // custom label for the Next button after this step
-  autoAdvance?: boolean; // when this step's content ends, play the next step immediately (no idle)
-  endAlign?: boolean; // delay the shorter of main/overlay so both clips end together
+  clip?: number; // play / walkout
+  autoAdvance?: boolean; // chain into the next step when the clip ends
+  freeze?: boolean; // hold the last frame when the clip ends
+  idleClip: number; // which idle loop covers this part of the show
+  inviteClip?: number; // live: open-palm invitation
+  speakClip?: number; // live: silent speak loop
+  photoSet?: PhotoSet;
+  caption?: string;
+  nextLabel?: string;
 }
 
-// The stage directive shape shared by the operator console and the stage.
+// The stage directive shared by operator and stage.
 export interface StepDirective {
   started: boolean;
   mode: "idle" | "segment" | "freeze";
   stepIndex: number;
-  mainClip: number | null;
-  overlayClip: number | null;
-  audioDelayMs: number;
-  endAlign: boolean;
+  clip: number | null;
+  idleClip: number;
+  photoFolder: string | null;
+  photoCount: number;
   caption: string;
   token: number;
   paused: boolean;
+  updatedAt?: number;
 }
 
-// Build the directive for a step. Used by the operator's Next button AND by
-// the auto-advance path on both screens — callers pass a deterministic token
-// (previous token + 1) so simultaneous auto-advance posts are idempotent.
 export function buildStepDirective(steps: Step[], i: number, token: number): StepDirective {
   const step = steps[i];
   const base = {
     started: true,
     stepIndex: i,
     token,
+    idleClip: step.idleClip,
+    photoFolder: step.photoSet?.folder ?? null,
+    photoCount: step.photoSet?.count ?? 0,
     caption: step.caption ?? "",
     paused: false,
-    endAlign: !!step.endAlign,
   };
-  if (step.kind === "walkout") {
-    return { ...base, mode: "freeze", overlayClip: step.overlay ?? null, mainClip: step.main ?? null, audioDelayMs: 0 };
-  }
-  if (step.kind === "options") {
-    // Idle; wait for the operator to pick a response.
-    return { ...base, mode: "idle", overlayClip: null, mainClip: null, audioDelayMs: 0, caption: "" };
-  }
-  if (step.kind === "question") {
-    return { ...base, mode: "idle", overlayClip: null, mainClip: null, audioDelayMs: 0 };
+  if (step.kind === "live") {
+    return { ...base, mode: "idle", clip: null };
   }
   return {
     ...base,
-    mode: "segment",
-    overlayClip: step.overlay ?? null,
-    mainClip: step.main ?? null,
-    audioDelayMs: step.audioDelayMs ?? 0,
+    mode: step.freeze || step.kind === "walkout" ? "freeze" : "segment",
+    clip: step.clip ?? null,
   };
+}
+
+// What the NEXT scene will need — preloaded into the spare buffer while the
+// current clip plays, so auto-advance starts instantly with zero stall.
+export function getPreloadClip(steps: Step[], i: number): number | null {
+  const nxt = steps[i + 1];
+  if (!nxt) return null;
+  if (nxt.kind === "live") return nxt.idleClip;
+  return nxt.clip ?? null;
 }
 
 export function getStepVideos(step: Step): string {
   if (!step) return "";
-  const nums: number[] = [];
-  if (step.overlay != null) nums.push(step.overlay);
-  if (step.main != null) nums.push(step.main);
-  if (step.pointClip != null) nums.push(step.pointClip);
-  if (step.idleClip != null) nums.push(step.idleClip);
-  if (step.options != null) {
-    step.options.forEach(o => {
-      if (o.clip != null) nums.push(o.clip);
-    });
+  if (step.kind === "live") {
+    return `Live — idle ${step.idleClip} · invite ${step.inviteClip} · speak ${step.speakClip}`;
   }
-  const uniqueNums = Array.from(new Set(nums)).sort((a, b) => a - b);
-  if (uniqueNums.length === 0) return "No Video";
-  if (uniqueNums.length === 1) return `Video ${uniqueNums[0]}`;
-  return `Videos ${uniqueNums.join(" & ")}`;
+  return `Video ${step.clip}`;
 }
 
 export const STEPS: Step[] = [
-  // ── Video 1 ──────────────────────────────────────────────
+  // ── VIDEO 1 — Pre-Activity (runs as one continuous chain) ──
+  { id: 0, label: "Walk-in", kind: "play", clip: 1, autoAdvance: true, idleClip: IDLE_CLASSROOM },
   {
-    id: 0,
-    label: "Walk In & Welcome",
-    kind: "play",
-    overlay: 1, // entrance (silent)
-    main: 2, // welcome script
-    audioDelayMs: 2500, // let her walk in and set down her folder first
-    autoAdvance: true, // no idle — straight into the Giga Map step
-    caption:
-      "Good evening, class. Welcome, everyone — it truly makes me happy to see you here.",
+    id: 1, label: "Welcome & Greetings", kind: "play", clip: 2, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "Good evening, class. Welcome, everyone — seeing you here truly makes me happy.",
   },
   {
-    id: 1,
-    label: "The 1,978 Schools · Giga Map",
-    kind: "play",
-    overlay: 3,
-    main: 4,
-    autoAdvance: true, // no idle — straight into the Redesign Question
-    caption:
-      "1,978 schools in The Gambia — every one now mapped. Look at the red dots: the unconnected ones.",
+    id: 2, label: "Classroom 360", kind: "play", clip: 3, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "I know it's not much to look at.",
   },
   {
-    id: 2,
-    label: "Redesign Question",
-    kind: "play",
-    overlay: 5, // writes the question on the board (silent)
-    main: 5.5, // question audio plays under the board-writing clip
-    endAlign: true, // audio starts late so it finishes as she steps back from the board
-    autoAdvance: true, // no idle — straight into the break announcement
-    caption:
-      "If every child in The Gambia had internet access at school, how would you re-design education?",
+    id: 3, label: "No Projector · Tablet · Internet", kind: "play", clip: 4, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "No projector. No tablet. No internet.",
   },
   {
-    id: 3,
-    label: "Break Announcement & Walk Out",
-    kind: "walkout",
-    main: 6, // "Ah, look at the time!" script
-    overlay: 7, // walk-out starts near the end of the line; freeze on the empty room
-    endAlign: true, // both clips end together — she walks out as the line lands
-    caption:
-      "Ah, look at the time! It's time for a break. Think about the question. Sit with it. Discuss it with your classmates at your table during the break. I will be back.",
-    nextLabel: "Return from break",
+    id: 4, label: "Classroom Story", kind: "play", clip: 5, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "Thirty-two children. Right on time. Because this classroom is a door.",
+  },
+  {
+    id: 5, label: "Giga Map Talk", kind: "play", clip: 6, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "1,978 schools — every single one now mapped. Look at all the red dots.",
+  },
+  {
+    id: 6, label: "Our School Is a Red Dot", kind: "play", clip: 7, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "Our school is one of those red dots.",
+  },
+  {
+    id: 7, label: "Chalk Pickup", kind: "play", clip: 8, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "So tonight, I am not going to lecture you. I am going to do what teachers do best.",
+  },
+  {
+    id: 8, label: "Write the Redesign Question", kind: "play", clip: 9, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "If every child in The Gambia had internet access at school, how would you re-design education?",
+  },
+  {
+    id: 9, label: "Break Announcement", kind: "play", clip: 10, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "Ah, look at the time! It's time for a break. Think about the question. I will be back.",
+  },
+  {
+    id: 10, label: "Walk-out · Break", kind: "walkout", clip: 11, idleClip: IDLE_CLASSROOM,
+    caption: "", nextLabel: "Return from break",
   },
 
-  // ── Video 2 ──────────────────────────────────────────────
+  // ── ACTIVITY A — Return + Live Discussion + Giga Story ──
+  { id: 11, label: "Return from Break", kind: "play", clip: 12, autoAdvance: true, idleClip: IDLE_CLASSROOM },
   {
-    id: 4,
-    label: "Return from Break",
-    kind: "return",
-    overlay: 8, // walks back in (silent)
-    main: 9,
-    audioDelayMs: 2500, // let her settle before the audio starts
-    caption: "Right, class — settle down please. Class is back in session.",
+    id: 12, label: "Back in Session", kind: "play", clip: 13, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "How would you re-design education in The Gambia if every child had internet access? Raise your hand and share what you think.",
   },
   {
-    id: 5,
-    label: "Open Discussion",
-    kind: "question",
-    idleClip: 10,
-    pointClip: 11,
-    caption: "(Listening — press Point Out when a guest raises a hand.)",
+    id: 13, label: "LIVE · Open Discussion", kind: "live", idleClip: IDLE_CLASSROOM,
+    inviteClip: 15, speakClip: 16,
+    caption: "", nextLabel: "Continue to Giga story",
   },
   {
-    id: 6,
-    label: "Respond to the Answer",
-    kind: "options",
-    options: [
-      {
-        clip: 13,
-        label: "Remote learning",
-        guidance: "Guest talked about online / remote classrooms, learning from afar.",
-        caption: "Yes! A classroom without walls — Basse learning with Banjul, Dakar, Lagos.",
-      },
-      {
-        clip: 14,
-        label: "Teachers",
-        guidance: "Guest talked about teachers or teacher training.",
-        caption: "Teachers are the backbone. Train the teachers, connect the schools.",
-      },
-      {
-        clip: 15,
-        label: "AI / technology",
-        guidance: "Guest talked about AI or technology tools.",
-        caption: "AI is only as useful as the connection it runs on. No internet, no AI.",
-      },
-    ],
+    id: 14, label: "Clever Class", kind: "play", clip: 17, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "Students giving their teacher homework — what a clever class you are!",
   },
   {
-    id: 7,
-    label: "Clever Class Pivot",
-    kind: "play",
-    main: 16,
-    caption: "You've given me homework — what a clever class you are!",
+    id: 15, label: "Giga Story · Sierra Leone", kind: "play", clip: 18, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    photoSet: { folder: "sierra-leone", count: 3 },
+    caption: "In Sierra Leone the cost dropped from $12,000 to just $1,500 per school, per year — nearly 90%.",
   },
   {
-    id: 8,
-    label: "The Global Giga Story",
-    kind: "play",
-    main: 17,
-    caption:
-      "Sierra Leone dropped 90%. In Kenya, Darlene is learning to code. And here in The Gambia…",
+    id: 16, label: "Giga Story · Kenya", kind: "play", clip: 19, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    photoSet: { folder: "kenya", count: 1 },
+    caption: "In Kakuma refugee camp, Darlene is learning to code. She wants to become a software engineer.",
+  },
+  {
+    id: 17, label: "Giga Story · The Gambia", kind: "play", clip: 20, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    photoSet: { folder: "gambia", count: 12 },
+    caption: "Every single one of the 1,978 schools is now on the map. And Giga will reach beyond schools.",
+  },
+  {
+    id: 18, label: "Mapping Done · Break", kind: "play", clip: 21, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    caption: "We have done the mapping. We have done the planning. What we need now is the doing.",
+  },
+  {
+    id: 19, label: "Walk-out · Meal Break", kind: "walkout", clip: 22, idleClip: IDLE_CLASSROOM,
+    caption: "", nextLabel: "Begin Connected Classroom",
   },
 
-  // ── Video 3 ──────────────────────────────────────────────
+  // ── ACTIVITY C — Connected Classroom ──
   {
-    id: 9,
-    label: "Imagine · Turning Point",
-    kind: "play",
-    main: 18,
-    caption: "We are at a turning point. What is missing is the final ingredient. You.",
+    id: 20, label: "Settle & Imagine", kind: "play", clip: 23, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "Tonight, you were asked to imagine something. And look — I want you to see what you described.",
   },
   {
-    id: 10,
-    label: "Write Commitment Question",
-    kind: "play",
-    overlay: 19, // walks to the board and writes it (silent)
-    main: 19.5, // "I have one final question… what can you and your organization do…" audio
-    endAlign: true, // same pattern as 5/5.5 — audio leads, board-writing lands at the end
-    autoAdvance: true, // flows straight into the Monitors & Cards line
-    caption:
-      "What can you and your organization do to help connect every school, health facility and TVET facility in The Gambia?",
+    id: 21, label: "Connected Classroom 360", kind: "play", clip: 24, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "",
   },
   {
-    id: 11,
-    label: "Monitors & Cards",
-    kind: "play",
-    main: 20,
-    caption: "My monitors in blue shirts will bring cards to your tables. Write your ideas.",
+    id: 22, label: "This Is Connectivity", kind: "play", clip: 25, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "This is what connectivity looks like. Not a statistic. Not a cost model. This.",
   },
   {
-    id: 12,
-    label: "Commitment Discussion",
-    kind: "question",
-    idleClip: 21,
-    pointClip: 22,
-    caption: "(Listening — press Point Out when a guest raises a hand.)",
+    id: 23, label: "Final Question", kind: "play", clip: 26, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "So, I have one final question. The question is:",
   },
   {
-    id: 13,
-    label: "Share What You Wrote",
-    kind: "play",
-    main: 23,
-    caption: "These are fantastic ideas. My heart is warm.",
+    id: 24, label: "Write the Commitment Question", kind: "play", clip: 27, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "What can you and your organization do to help connect every school, health facility and TVET facility in The Gambia?",
+  },
+  {
+    id: 25, label: "Cards & Share", kind: "play", clip: 28, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "The UNICEF team in blue shirts will come to your tables. Write down your ideas — and raise your hand to share.",
+  },
+  {
+    id: 26, label: "LIVE · Commitment Discussion", kind: "live", idleClip: IDLE_CONNECTED,
+    inviteClip: 30, speakClip: 31,
+    caption: "", nextLabel: "Continue to treats",
+  },
+  {
+    id: 27, label: "Not Just Talk · Treats", kind: "play", clip: 32, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "Please do not let this be just a talk. Our children are counting on you.",
+  },
+  {
+    id: 28, label: "Walk-out · Dessert", kind: "walkout", clip: 33, idleClip: IDLE_CONNECTED,
+    caption: "", nextLabel: "Begin Closing",
   },
 
-  // ── Video 4 ──────────────────────────────────────────────
+  // ── ACTIVITY D — Closing ──
+  { id: 29, label: "Return for Closing", kind: "play", clip: 34, autoAdvance: true, idleClip: IDLE_CONNECTED },
   {
-    id: 14,
-    label: "Closing & Dismissal",
-    kind: "play",
-    main: 24,
-    caption: "My thirty-two students are counting on your courage. Class dismissed.",
-    nextLabel: "Show Closing Graphic",
+    id: 30, label: "Closing", kind: "play", clip: 35, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "My students are counting on your courage. Class dismissed.",
   },
   {
-    id: 15,
-    label: "UNICEF Closing Graphic",
-    kind: "play",
-    main: 25,
-    caption: "Access to affordable, sustainable, safe and resilient connectivity for every child — empowering them through information, opportunity, choice and dignity.",
-    nextLabel: "End",
+    id: 31, label: "UNICEF Logo Card", kind: "play", clip: 36, freeze: true, idleClip: IDLE_CONNECTED,
+    caption: "", nextLabel: "End of show",
   },
 ];
