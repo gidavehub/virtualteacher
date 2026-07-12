@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { StepDirective } from "./show-timeline";
-import { getClipUrl, getPhotoUrl } from "./video-cache";
+import { getClipUrl } from "./video-cache";
 import { subscribePhotosForSegment } from "./db-helpers";
 
 // Back-compat alias — operator/stage import this name.
@@ -26,8 +26,10 @@ interface Props {
 //      CROSS-FADE into each other instead of hard-cutting. During the live
 //      discussions the idle-nod loop plays IN a buffer like any other scene,
 //      so it enters and leaves through the same seamless fade.
-//   3. photo overlay (top) — site-visit photos: big in front briefly, then
-//      docked to a background strip, one by one.
+//   3. photo overlay (top) — at the timed moments (photoGroups), the segment's
+//      photos POP UP ALL TOGETHER around Rohey for ~5 seconds, then settle
+//      into the scrolling ring. ONLY popped-up photos ever ride the ring, and
+//      the ring persists across the Giga-story segments until a clear trigger.
 // freeze mode holds the clip's last frame (walk-outs, the closing card) and
 // the next scene cross-fades straight over it — nothing in between.
 // PAUSE freezes the current frame in place. No scene swap.
@@ -50,7 +52,7 @@ export default function StageEngine({
 
   const lastToken = useRef<number>(-1);
 
-  // ── Photo overlay state ──
+  // ── Photos for the current segment (managed live via /upload) ──
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   useEffect(() => {
     const folder = session?.photoFolder;
@@ -65,26 +67,31 @@ export default function StageEngine({
       unsubscribe();
     };
   }, [session?.photoFolder]);
+  const photoUrlsRef = useRef<string[]>([]);
+  photoUrlsRef.current = photoUrls;
 
-  const photoSrc = (i: number) => photoUrls[i] || "";
+  // ── Photo overlay state ──
+  // popup: URLs currently popped up all together around Rohey.
+  // popped: URLs that have popped up so far — ONLY these ride the ring, and
+  // they persist across segments (stored as URLs, not per-folder indices)
+  // until a clear trigger fires or a photo-less step arrives.
+  const [popup, setPopup] = useState<string[]>([]);
+  const [popped, setPopped] = useState<string[]>([]);
+  const firedGroups = useRef<Set<number>>(new Set());
+  const popupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [photoIdx, setPhotoIdx] = useState(-1); // index currently "in front"
-  const [poppedUpIndices, setPoppedUpIndices] = useState<number[]>([]);
-  const photoTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const frontTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ── Giga map intro: the map large in front of Rohey for the first 3s ──
+  const [mapIntroVisible, setMapIntroVisible] = useState(false);
+  const mapIntroTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [currentInterval, setCurrentInterval] = useState(6000);
   const [scrollOffset, setScrollOffset] = useState(0);
   const lastTimeRef = useRef<number | null>(null);
 
   const pausedRef = useRef(session?.paused ?? false);
   pausedRef.current = session?.paused ?? false;
 
-  const intervalRef = useRef(6000);
-  intervalRef.current = currentInterval;
-
-  const poppedUpCountRef = useRef(0);
-  poppedUpCountRef.current = poppedUpIndices.length;
+  const poppedCountRef = useRef(0);
+  poppedCountRef.current = popped.length;
 
   // ── Scroll animation loop ──
   useEffect(() => {
@@ -94,15 +101,16 @@ export default function StageEngine({
     }
 
     const itemWidth = 176; // IMAGE_WIDTH (160) + MARGIN_RIGHT (16)
+    const secondsPerItem = 6;
     let frameId: number;
 
     const tick = (now: number) => {
       if (lastTimeRef.current !== null) {
         const dt = (now - lastTimeRef.current) / 1000; // in seconds
-        
+
         // Only scroll if not paused and we have items
-        if (!pausedRef.current && poppedUpCountRef.current > 0) {
-          const speed = itemWidth / (intervalRef.current / 1000); // pixels per second
+        if (!pausedRef.current && poppedCountRef.current > 0) {
+          const speed = itemWidth / secondsPerItem; // pixels per second
           setScrollOffset((prev) => prev - speed * dt);
         }
       }
@@ -119,37 +127,54 @@ export default function StageEngine({
 
   // ── Sync scroll offset with first item ──
   useEffect(() => {
-    if (poppedUpIndices.length === 1) {
+    if (popped.length === 1) {
       setScrollOffset(-80); // -IMAGE_WIDTH / 2 (160 / 2)
-    } else if (poppedUpIndices.length === 0) {
+    } else if (popped.length === 0) {
       setScrollOffset(0);
     }
-  }, [poppedUpIndices.length]);
+  }, [popped.length]);
 
   const bufEl = (which: "A" | "B" | null) =>
     which === "A" ? bufARef.current : which === "B" ? bufBRef.current : null;
 
+  // Clears the popup + trigger timers for a new scene. The ring is NOT
+  // cleared here — it persists across the Giga-story segments.
   const stopPhotos = useCallback(() => {
-    if (photoTimer.current) clearInterval(photoTimer.current);
-    if (frontTimer.current) clearTimeout(frontTimer.current);
-    photoTimer.current = null;
-    frontTimer.current = null;
-    setPhotoIdx(-1);
-    setPoppedUpIndices([]);
+    if (popupTimer.current) clearTimeout(popupTimer.current);
+    popupTimer.current = null;
+    firedGroups.current = new Set();
+    setPopup([]);
+  }, []);
+
+  // ── One-time buffer setup: start invisible, stacked beneath the active ──
+  useEffect(() => {
+    [bufARef.current, bufBRef.current].forEach((el) => {
+      if (!el) return;
+      el.style.opacity = "0";
+      el.style.zIndex = "21";
+    });
   }, []);
 
   // ── Base layer: the empty classroom (first frame of clip 1), loaded once ──
+  // Pinned hard to frame 0 — if anything ever plays it (e.g. the browser
+  // audio unlock), it snaps straight back so Rohey can never be caught
+  // mid-entrance on the backdrop.
   useEffect(() => {
     if (!active) return;
     const base = baseRef.current;
     if (!base || base.src) return;
+    const pin = () => {
+      base.pause();
+      base.currentTime = 0;
+    };
+    base.addEventListener("play", pin);
+    base.addEventListener("loadeddata", pin, { once: true });
     (async () => {
       base.src = await getClipUrl(1);
       base.load();
-      base.currentTime = 0;
       base.muted = true;
-      base.pause(); // a still frame — never plays
     })();
+    return () => base.removeEventListener("play", pin);
   }, [active]);
 
   // ── React to a new directive ──
@@ -172,18 +197,38 @@ export default function StageEngine({
           : session.clip;
 
       if (targetClip == null) {
-        const cur = bufEl(activeBufRef.current);
-        cur?.pause();
+        // Fade the scene away to reveal the empty-classroom base.
+        [bufARef.current, bufBRef.current].forEach((el) => {
+          if (!el) return;
+          el.style.transition = "opacity 700ms ease";
+          el.style.opacity = "0";
+          setTimeout(() => el.pause(), 750);
+        });
         setActiveBuf(null);
         stopPhotos();
+        setPopped([]); // no scene, no ring
+        setMapIntroVisible(false);
         return;
       }
 
       if (!changed) return;
 
-      // New scene: load into the INACTIVE buffer and cross-fade over the
-      // current one (or over the base / a frozen last frame).
+      // New scene: reset popups/triggers. The ring survives as long as the
+      // incoming step still carries photos; otherwise it clears.
       stopPhotos();
+      if (!session.photoFolder) setPopped([]);
+
+      // Giga map intro: hold the map large in front of Rohey for 3 seconds.
+      if (mapIntroTimer.current) clearTimeout(mapIntroTimer.current);
+      if (session.mapIntro && session.mode === "segment") {
+        setMapIntroVisible(true);
+        mapIntroTimer.current = setTimeout(() => setMapIntroVisible(false), 3000);
+      } else {
+        setMapIntroVisible(false);
+      }
+
+      // Load into the INACTIVE buffer and cross-fade over the current one
+      // (or over the base / a frozen last frame).
       const next: "A" | "B" = activeBufRef.current === "A" ? "B" : "A";
       const nextEl = bufEl(next);
       const prevEl = bufEl(activeBufRef.current);
@@ -199,13 +244,41 @@ export default function StageEngine({
       nextEl.muted = session.mode === "idle" ? true : muted;
       nextEl.volume = 1.0;
       if (!session.paused) nextEl.play().catch(() => {});
+
+      // TRUE cross-fade: the outgoing scene stays FULLY OPAQUE underneath
+      // while the incoming one fades in on top. Nothing behind them (the
+      // base frame with Rohey at the edge of the shot) can ever bleed
+      // through mid-fade — that was the split-second "walk-in" ghost.
+      if (prevEl && prevEl !== nextEl) {
+        prevEl.style.transition = "none";
+        prevEl.style.opacity = "1";
+        prevEl.style.zIndex = "21";
+      }
+      nextEl.style.transition = "none";
+      nextEl.style.opacity = "0";
+      nextEl.style.zIndex = "22";
+
+      // Start the fade only once the incoming clip can actually paint a
+      // frame — the old scene holds until then (no black flash either).
+      const startFade = () => {
+        // force a style flush so the fade animates from 0
+        void nextEl.offsetWidth;
+        nextEl.style.transition = "opacity 700ms ease";
+        nextEl.style.opacity = "1";
+      };
+      if (nextEl.readyState >= 2) {
+        startFade();
+      } else {
+        nextEl.addEventListener("canplay", startFade, { once: true });
+      }
+
       setActiveBuf(next);
 
-      // Let the old buffer finish its fade-out, then silence it.
+      // Silence the covered buffer once the fade has fully landed.
       if (prevEl && prevEl !== nextEl) {
         setTimeout(() => {
           prevEl.pause();
-        }, 750);
+        }, 900);
       }
     }
 
@@ -238,8 +311,6 @@ export default function StageEngine({
     if (!cur) return;
     if (session.paused) {
       cur.pause();
-      if (photoTimer.current) clearInterval(photoTimer.current);
-      photoTimer.current = null;
     } else if (!cur.ended) {
       cur.play().catch(() => {});
     }
@@ -252,61 +323,57 @@ export default function StageEngine({
     if (cur && !cur.loop) cur.muted = muted;
   }, [muted, activeBuf]);
 
-  // ── Photo overlay cycle, timed across the clip's duration ──
+  // ── Timed photo pop-ups: each group fires as the clip crosses its `at` ──
+  // The group pops up all together around Rohey for ~5 seconds, then settles
+  // into the ring. A `clear` group removes everything (popups + ring).
   useEffect(() => {
     if (!active || !session || session.mode !== "segment") return;
-    if (!session.photoFolder || photoUrls.length === 0) return;
+    const groups = session.photoGroups ?? [];
+    if (!session.photoFolder || groups.length === 0) return;
     if (session.token !== lastToken.current) return; // wait for apply()
 
     const cur = bufEl(activeBuf);
-    if (!cur || session.paused) return;
+    if (!cur) return;
 
-    const count = photoUrls.length;
-    const startCycle = () => {
-      const dur = isFinite(cur.duration) && cur.duration > 0 ? cur.duration : count * 6;
-      const interval = Math.max(4000, Math.min(9000, (dur * 1000) / (count + 1)));
-      setCurrentInterval(interval);
-      // One pooled gallery — shuffle the order every scene and keep rotating
-      // through all of them for as long as the clip runs.
-      const order = Array.from({ length: count }, (_, k) => k);
-      for (let k = order.length - 1; k > 0; k--) {
-        const j = Math.floor(Math.random() * (k + 1));
-        [order[k], order[j]] = [order[j], order[k]];
-      }
-      let i = 0;
-      const show = () => {
-        const current = order[i % count];
-        setPhotoIdx(current);
-        setPoppedUpIndices((prev) => {
-          if (prev.includes(current)) return prev;
-          return [...prev, current];
-        });
-        // Hold "in front" for a beat, then fade back to the scrolling ring.
-        frontTimer.current = setTimeout(() => {
-          setPhotoIdx(-1);
-        }, Math.min(3000, interval * 0.45));
-        i += 1;
-      };
-      show();
-      photoTimer.current = setInterval(show, interval);
+    const onTime = () => {
+      const t = cur.currentTime;
+      groups.forEach((g, gi) => {
+        if (firedGroups.current.has(gi) || t < g.at) return;
+        firedGroups.current.add(gi);
+
+        if (g.clear) {
+          if (popupTimer.current) clearTimeout(popupTimer.current);
+          setPopup([]);
+          setPopped([]);
+          return;
+        }
+
+        // Resolve the group to URLs: the configured indices when they exist,
+        // otherwise every photo currently in the segment (managed via /upload).
+        const urls = photoUrlsRef.current;
+        const groupUrls =
+          g.photos && g.photos.length > 0
+            ? g.photos.map((i) => urls[i]).filter(Boolean)
+            : urls;
+        if (groupUrls.length === 0) return;
+
+        setPopup(groupUrls);
+        if (popupTimer.current) clearTimeout(popupTimer.current);
+        popupTimer.current = setTimeout(() => {
+          setPopup([]);
+          setPopped((prev) => {
+            const merged = [...prev];
+            for (const u of groupUrls) if (!merged.includes(u)) merged.push(u);
+            return merged;
+          });
+        }, 5000);
+      });
     };
 
-    if (isFinite(cur.duration) && cur.duration > 0) {
-      startCycle();
-    } else {
-      const onMeta = () => startCycle();
-      cur.addEventListener("loadedmetadata", onMeta, { once: true });
-      return () => cur.removeEventListener("loadedmetadata", onMeta);
-    }
-
-    return () => {
-      if (photoTimer.current) clearInterval(photoTimer.current);
-      if (frontTimer.current) clearTimeout(frontTimer.current);
-      photoTimer.current = null;
-      frontTimer.current = null;
-    };
+    cur.addEventListener("timeupdate", onTime);
+    return () => cur.removeEventListener("timeupdate", onTime);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.token, activeBuf, active, session?.paused, photoUrls]);
+  }, [session?.token, activeBuf, active]);
 
   // ── Progress reporting from the active buffer ──
   useEffect(() => {
@@ -326,18 +393,17 @@ export default function StageEngine({
     onContentEnded?.(lastToken.current);
   };
 
+  // Keep the last popup group around while it fades out.
+  const lastPopup = useRef<string[]>([]);
+  if (popup.length > 0) lastPopup.current = popup;
+  const popupVisible = popup.length > 0;
+  const popupPhotos = popupVisible ? popup : lastPopup.current;
+  const popupLeft = popupPhotos.slice(0, Math.ceil(popupPhotos.length / 2));
+  const popupRight = popupPhotos.slice(Math.ceil(popupPhotos.length / 2));
 
-
-  // Remember the last photo shown "in front" so it can fade out gracefully
-  // instead of vanishing the instant it docks.
-  const lastFrontIdx = useRef(0);
-  if (photoIdx >= 0) lastFrontIdx.current = photoIdx;
-  const frontVisible = photoIdx >= 0;
-
-  const bufClass = (mine: "A" | "B") =>
-    `absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
-      activeBuf === mine ? "opacity-100" : "opacity-0"
-    }`;
+  // Buffer opacity/stacking is driven imperatively in apply() — the class
+  // stays static so React re-renders never fight the fade styles.
+  const bufClass = () => "absolute inset-0 w-full h-full object-cover";
 
   return (
     <div className="absolute inset-0 bg-black">
@@ -345,6 +411,7 @@ export default function StageEngine({
           screen before the show and beneath every fade. Always opaque. */}
       <video
         ref={baseRef}
+        data-role="base"
         className="absolute inset-0 w-full h-full object-cover"
         playsInline
         muted
@@ -352,14 +419,28 @@ export default function StageEngine({
       />
 
       {/* Alternating scene buffers — consecutive scenes cross-fade. */}
-      <video ref={bufARef} onEnded={handleEnded("A")} className={bufClass("A")} playsInline />
-      <video ref={bufBRef} onEnded={handleEnded("B")} className={bufClass("B")} playsInline />
+      <video ref={bufARef} onEnded={handleEnded("A")} className={bufClass()} playsInline />
+      <video ref={bufBRef} onEnded={handleEnded("B")} className={bufClass()} playsInline />
 
-      {/* ── Photo overlay: a queue of popped up photos scrolling continuously ── */}
-      {session?.photoFolder && photoUrls.length > 0 && (
+      {/* ── Giga map intro: large in front of Rohey for the first 3 seconds,
+             then it lives on the board behind her (baked into the video) ── */}
+      <div
+        className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none transition-all duration-700 ease-out ${
+          mapIntroVisible ? "opacity-100 scale-100" : "opacity-0 scale-[0.92]"
+        }`}
+      >
+        <img
+          src="/media/giga-map.png"
+          alt=""
+          className="max-w-[80%] max-h-[80%] rounded-2xl object-contain border border-white/25 shadow-[0_30px_80px_rgba(0,0,0,0.7)]"
+        />
+      </div>
+
+      {/* ── Photo overlay ── */}
+      {(popped.length > 0 || popupPhotos.length > 0) && (
         <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
-          {/* Scroll ring queue — moves continuously focusing on the latest item */}
-          {poppedUpIndices.length > 0 && (
+          {/* Scroll ring queue — ONLY popped-up photos, moving continuously */}
+          {popped.length > 0 && (
             <div className="absolute top-6 left-0 right-0 overflow-hidden h-36">
               <div
                 className="flex items-center absolute left-0"
@@ -368,12 +449,12 @@ export default function StageEngine({
                   width: "max-content",
                 }}
               >
-                {poppedUpIndices.map((idx) => {
-                  const isLatest = idx === poppedUpIndices[poppedUpIndices.length - 1];
+                {popped.map((url, k) => {
+                  const isLatest = k === popped.length - 1;
                   return (
                     <img
-                      key={idx}
-                      src={photoSrc(idx)}
+                      key={url}
+                      src={url}
                       alt=""
                       className={`h-24 md:h-32 rounded-lg object-cover border border-white/20 shadow-xl opacity-90 ${
                         isLatest ? "animate-join-ring" : "mr-4"
@@ -387,18 +468,36 @@ export default function StageEngine({
               </div>
             </div>
           )}
-          {/* Featured photo — big, in front of Rohey, fades back into the ring */}
+
+          {/* Pop-up group — all photos together around Rohey for ~5 seconds,
+              flanking her on both sides, then they settle into the ring */}
           <div
-            className={`absolute inset-0 flex items-center justify-center transition-all duration-700 ease-out ${
-              frontVisible ? "opacity-100 scale-100" : "opacity-0 scale-[0.92]"
+            className={`absolute inset-0 transition-all duration-700 ease-out ${
+              popupVisible ? "opacity-100 scale-100" : "opacity-0 scale-[0.94]"
             }`}
           >
-            <img
-              key={frontVisible ? photoIdx : lastFrontIdx.current}
-              src={photoSrc(frontVisible ? photoIdx : lastFrontIdx.current)}
-              alt=""
-              className="max-w-[62%] max-h-[68%] rounded-2xl object-contain border border-white/25 shadow-[0_30px_80px_rgba(0,0,0,0.7)] animate-photo-in"
-            />
+            <div className="absolute left-[4%] inset-y-0 w-[26%] flex flex-col items-center justify-center gap-4">
+              {popupLeft.map((url, k) => (
+                <img
+                  key={url}
+                  src={url}
+                  alt=""
+                  className="w-full max-h-[26vh] rounded-xl object-cover border border-white/25 shadow-[0_20px_60px_rgba(0,0,0,0.65)] animate-photo-in"
+                  style={{ animationDelay: `${k * 0.12}s` }}
+                />
+              ))}
+            </div>
+            <div className="absolute right-[4%] inset-y-0 w-[26%] flex flex-col items-center justify-center gap-4">
+              {popupRight.map((url, k) => (
+                <img
+                  key={url}
+                  src={url}
+                  alt=""
+                  className="w-full max-h-[26vh] rounded-xl object-cover border border-white/25 shadow-[0_20px_60px_rgba(0,0,0,0.65)] animate-photo-in"
+                  style={{ animationDelay: `${(k + popupLeft.length) * 0.12}s` }}
+                />
+              ))}
+            </div>
           </div>
         </div>
       )}

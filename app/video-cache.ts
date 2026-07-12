@@ -1,15 +1,21 @@
 // Video caching manager using the browser's Cache Storage API.
 // Allows pre-downloading the entire 400MB show to run 100% offline with zero buffering.
 
-export const CACHE_NAME = "vftp-video-cache-v2";
+// v3: corrected clips replaced the originals in storage — the new cache name
+// forces every device to re-download fresh instead of serving stale copies.
+export const CACHE_NAME = "vftp-video-cache-v3";
 
-// The 36 final v2 clips (audio baked in) to cache for offline playback
-export const CLIPS_TO_CACHE = Array.from({ length: 36 }, (_, i) => i + 1);
+// The final v2 clips (audio baked in) to cache for offline playback.
+// Clip 4 (blackboard/desk/textbook cutaways) was cut from the show entirely —
+// never played, never downloaded.
+export const CLIPS_TO_CACHE = Array.from({ length: 36 }, (_, i) => i + 1).filter((n) => n !== 4);
 
-// The site-visit photos shown during the Giga story — one pooled set, cached
-// alongside the clips so the whole show runs offline, zero buffering.
+// The site-visit photos shown during the Giga story — cached alongside the
+// clips so the whole show runs offline, zero buffering.
 export const PHOTO_SETS: { folder: string; count: number }[] = [
-  { folder: "all", count: 16 },
+  { folder: "sierra_leone", count: 5 },
+  { folder: "kenya", count: 5 },
+  { folder: "the_gambia", count: 6 },
 ];
 
 const GCS_BASE = "https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app";

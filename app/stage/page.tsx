@@ -156,9 +156,12 @@ export default function StageProjection() {
   };
 
   const handleUnlock = () => {
-    // Unlocks browser video elements
+    // Unlocks browser video elements. The engine's base backdrop (the empty
+    // classroom frame) is skipped — nudging it forward showed Rohey
+    // mid-entrance behind the scenes.
     const videos = document.querySelectorAll("video");
     videos.forEach((v) => {
+      if ((v as HTMLVideoElement).dataset.role === "base") return;
       try {
         const p = v.play();
         if (p !== undefined) {

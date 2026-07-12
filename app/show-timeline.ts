@@ -28,6 +28,16 @@ export interface PhotoSet {
   count: number;
 }
 
+// A timed photo moment inside a clip: at `at` seconds into the scene, the
+// group of photos pops up all together around Rohey for ~5 seconds, then
+// settles into the background ring. `clear: true` removes everything instead.
+// ONLY photos that have popped up ever appear on the ring.
+export interface PhotoGroup {
+  at: number; // seconds into the clip (tweak these to match the spoken lines)
+  photos?: number[]; // 0-based indices into the pooled photo set
+  clear?: boolean; // remove all photos (popups + ring)
+}
+
 export interface Step {
   id: number;
   label: string;
@@ -39,6 +49,8 @@ export interface Step {
   inviteClip?: number; // live: open-palm invitation
   speakClip?: number; // live: silent speak loop
   photoSet?: PhotoSet;
+  photoGroups?: PhotoGroup[]; // timed pop-up moments within this clip
+  mapIntro?: boolean; // show the Giga map large in front of Rohey for the first 3s
   caption?: string;
   nextLabel?: string;
 }
@@ -52,6 +64,8 @@ export interface StepDirective {
   idleClip: number;
   photoFolder: string | null;
   photoCount: number;
+  photoGroups?: PhotoGroup[];
+  mapIntro?: boolean;
   caption: string;
   token: number;
   paused: boolean;
@@ -67,6 +81,8 @@ export function buildStepDirective(steps: Step[], i: number, token: number): Ste
     idleClip: step.idleClip,
     photoFolder: step.photoSet?.folder ?? null,
     photoCount: step.photoSet?.count ?? 0,
+    photoGroups: step.photoGroups ?? [],
+    mapIntro: !!step.mapIntro,
     caption: step.caption ?? "",
     paused: false,
   };
@@ -108,125 +124,129 @@ export const STEPS: Step[] = [
     id: 2, label: "Classroom 360", kind: "play", clip: 3, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "I know it's not much to look at.",
   },
+  // (Cutaways clip 4 removed per UNICEF: no blackboard/desk/textbook video.)
   {
-    id: 3, label: "No Projector · Tablet · Internet", kind: "play", clip: 4, autoAdvance: true, idleClip: IDLE_CLASSROOM,
-    caption: "No projector. No tablet. No internet.",
-  },
-  {
-    id: 4, label: "Classroom Story", kind: "play", clip: 5, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 3, label: "Classroom Story", kind: "play", clip: 5, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "Thirty-two children. Right on time. Because this classroom is a door.",
   },
   {
-    id: 5, label: "Giga Map Talk", kind: "play", clip: 6, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 4, label: "Giga Map Talk", kind: "play", clip: 6, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    mapIntro: true, // map shows large in front of Rohey for 3s, then lives on the board behind her
     caption: "1,978 schools — every single one now mapped. Look at all the red dots.",
   },
   {
-    id: 6, label: "Our School Is a Red Dot", kind: "play", clip: 7, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 5, label: "Our School Is a Red Dot", kind: "play", clip: 7, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "Our school is one of those red dots.",
   },
   {
-    id: 7, label: "Chalk Pickup", kind: "play", clip: 8, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 6, label: "Chalk Pickup", kind: "play", clip: 8, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "So tonight, I am not going to lecture you. I am going to do what teachers do best.",
   },
   {
-    id: 8, label: "Write the Redesign Question", kind: "play", clip: 9, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 7, label: "Write the Redesign Question", kind: "play", clip: 9, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "If every child in The Gambia had internet access at school, how would you re-design education?",
   },
   {
-    id: 9, label: "Break Announcement", kind: "play", clip: 10, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 8, label: "Break Announcement", kind: "play", clip: 10, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "Ah, look at the time! It's time for a break. Think about the question. I will be back.",
   },
   {
-    id: 10, label: "Walk-out · Break", kind: "walkout", clip: 11, idleClip: IDLE_CLASSROOM,
+    id: 9, label: "Walk-out · Break", kind: "walkout", clip: 11, idleClip: IDLE_CLASSROOM,
     caption: "", nextLabel: "Return from break",
   },
 
   // ── ACTIVITY A — Return + Live Discussion + Giga Story ──
-  { id: 11, label: "Return from Break", kind: "play", clip: 12, autoAdvance: true, idleClip: IDLE_CLASSROOM },
+  { id: 10, label: "Return from Break", kind: "play", clip: 12, autoAdvance: true, idleClip: IDLE_CLASSROOM },
   {
-    id: 12, label: "Back in Session", kind: "play", clip: 13, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 11, label: "Back in Session", kind: "play", clip: 13, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "How would you re-design education in The Gambia if every child had internet access? Raise your hand and share what you think.",
   },
   {
-    id: 13, label: "LIVE · Open Discussion", kind: "live", idleClip: IDLE_CLASSROOM,
+    id: 12, label: "LIVE · Open Discussion", kind: "live", idleClip: IDLE_CLASSROOM,
     inviteClip: 15, speakClip: 16,
     caption: "", nextLabel: "Continue to Giga story",
   },
   {
-    id: 14, label: "Clever Class", kind: "play", clip: 17, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 13, label: "Clever Class", kind: "play", clip: 17, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "Students giving their teacher homework — what a clever class you are!",
   },
   {
-    id: 15, label: "Giga Story · Sierra Leone", kind: "play", clip: 18, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 14, label: "Giga Story · Sierra Leone", kind: "play", clip: 18, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     photoSet: { folder: "sierra_leone", count: 5 },
+    photoGroups: [{ at: 16, photos: [0, 1, 2, 3, 4] }], // "For example, in Sierra Leone…"
     caption: "In Sierra Leone the cost dropped from $12,000 to just $1,500 per school, per year — nearly 90%.",
   },
   {
-    id: 16, label: "Giga Story · Kenya", kind: "play", clip: 19, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 15, label: "Giga Story · Kenya", kind: "play", clip: 19, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     photoSet: { folder: "kenya", count: 5 },
+    photoGroups: [{ at: 1, photos: [0, 1, 2, 3, 4] }], // "In Kakuma refugee camp…"
     caption: "In Kakuma refugee camp, Darlene is learning to code. She wants to become a software engineer.",
   },
   {
-    id: 17, label: "Giga Story · The Gambia", kind: "play", clip: 20, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 16, label: "Giga Story · The Gambia", kind: "play", clip: 20, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     photoSet: { folder: "the_gambia", count: 6 },
+    photoGroups: [
+      { at: 11, photos: [0, 1, 2, 3, 4, 5] }, // "That kicked off a nationwide mapping…" (NOT during the VP line)
+      { at: 63, clear: true }, // "The national ICT infrastructure is being assessed…"
+    ],
     caption: "Every single one of the 1,978 schools is now on the map. And Giga will reach beyond schools.",
   },
   {
-    id: 18, label: "Mapping Done · Break", kind: "play", clip: 21, autoAdvance: true, idleClip: IDLE_CLASSROOM,
+    id: 17, label: "Mapping Done · Break", kind: "play", clip: 21, autoAdvance: true, idleClip: IDLE_CLASSROOM,
     caption: "We have done the mapping. We have done the planning. What we need now is the doing.",
   },
   {
-    id: 19, label: "Walk-out · Meal Break", kind: "walkout", clip: 22, idleClip: IDLE_CLASSROOM,
+    id: 18, label: "Walk-out · Meal Break", kind: "walkout", clip: 22, idleClip: IDLE_CLASSROOM,
     caption: "", nextLabel: "Begin Connected Classroom",
   },
 
   // ── ACTIVITY C — Connected Classroom ──
   {
-    id: 20, label: "Settle & Imagine", kind: "play", clip: 23, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    id: 19, label: "Settle & Imagine", kind: "play", clip: 23, autoAdvance: true, idleClip: IDLE_CONNECTED,
     caption: "Tonight, you were asked to imagine something. And look — I want you to see what you described.",
   },
   {
-    id: 21, label: "Connected Classroom 360", kind: "play", clip: 24, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    id: 20, label: "Connected Classroom 360", kind: "play", clip: 24, autoAdvance: true, idleClip: IDLE_CONNECTED,
     caption: "",
   },
   {
-    id: 22, label: "This Is Connectivity", kind: "play", clip: 25, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    id: 21, label: "This Is Connectivity", kind: "play", clip: 25, autoAdvance: true, idleClip: IDLE_CONNECTED,
     caption: "This is what connectivity looks like. Not a statistic. Not a cost model. This.",
   },
   {
-    id: 23, label: "Final Question", kind: "play", clip: 26, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    id: 22, label: "Final Question", kind: "play", clip: 26, autoAdvance: true, idleClip: IDLE_CONNECTED,
     caption: "So, I have one final question. The question is:",
   },
   {
-    id: 24, label: "Write the Commitment Question", kind: "play", clip: 27, autoAdvance: true, idleClip: IDLE_CONNECTED,
-    caption: "What can you and your organization do to help connect every school, health facility and TVET facility in The Gambia?",
+    id: 23, label: "Write the Commitment Question", kind: "play", clip: 27, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    caption: "What can you and your organisation do to ensure affordable, sustainable, safe, and inclusive connectivity for every child?",
   },
   {
-    id: 25, label: "Cards & Share", kind: "play", clip: 28, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    id: 24, label: "Cards & Share", kind: "play", clip: 28, autoAdvance: true, idleClip: IDLE_CONNECTED,
     caption: "The UNICEF team in blue shirts will come to your tables. Write down your ideas — and raise your hand to share.",
   },
   {
-    id: 26, label: "LIVE · Commitment Discussion", kind: "live", idleClip: IDLE_CONNECTED,
+    id: 25, label: "LIVE · Commitment Discussion", kind: "live", idleClip: IDLE_CONNECTED,
     inviteClip: 30, speakClip: 31,
     caption: "", nextLabel: "Continue to treats",
   },
   {
-    id: 27, label: "Not Just Talk · Treats", kind: "play", clip: 32, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    id: 26, label: "Not Just Talk · Treats", kind: "play", clip: 32, autoAdvance: true, idleClip: IDLE_CONNECTED,
     caption: "Please do not let this be just a talk. Our children are counting on you.",
   },
   {
-    id: 28, label: "Walk-out · Dessert", kind: "walkout", clip: 33, idleClip: IDLE_CONNECTED,
+    id: 27, label: "Walk-out · Dessert", kind: "walkout", clip: 33, idleClip: IDLE_CONNECTED,
     caption: "", nextLabel: "Begin Closing",
   },
 
   // ── ACTIVITY D — Closing ──
-  { id: 29, label: "Return for Closing", kind: "play", clip: 34, autoAdvance: true, idleClip: IDLE_CONNECTED },
+  { id: 28, label: "Return for Closing", kind: "play", clip: 34, autoAdvance: true, idleClip: IDLE_CONNECTED },
   {
-    id: 30, label: "Closing", kind: "play", clip: 35, autoAdvance: true, idleClip: IDLE_CONNECTED,
+    id: 29, label: "Closing", kind: "play", clip: 35, autoAdvance: true, idleClip: IDLE_CONNECTED,
     caption: "My students are counting on your courage. Class dismissed.",
   },
   {
-    id: 31, label: "UNICEF Logo Card", kind: "play", clip: 36, freeze: true, idleClip: IDLE_CONNECTED,
+    id: 30, label: "UNICEF Logo Card", kind: "play", clip: 36, freeze: true, idleClip: IDLE_CONNECTED,
     caption: "", nextLabel: "End of show",
   },
 ];
