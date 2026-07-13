@@ -241,7 +241,9 @@ export default function StageEngine({
       }
       nextEl.currentTime = 0;
       nextEl.loop = session.mode === "idle"; // idle nod loops seamlessly
-      nextEl.muted = session.mode === "idle" ? true : muted;
+      // Idle loops and live gesture triggers are ALWAYS silent — the gesture
+      // clip only moves Rohey's mouth; Fatou provides the voice live.
+      nextEl.muted = session.mode === "idle" || !!session.silent ? true : muted;
       nextEl.volume = 1.0;
       if (!session.paused) nextEl.play().catch(() => {});
 
@@ -317,11 +319,12 @@ export default function StageEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.paused, active]);
 
-  // ── Live mute changes (idle-nod buffers stay muted — they're silent) ──
+  // ── Live mute changes (idle-nod buffers and silent gesture triggers stay
+  //    muted regardless of the stage's mute toggle) ──
   useEffect(() => {
     const cur = bufEl(activeBufRef.current);
-    if (cur && !cur.loop) cur.muted = muted;
-  }, [muted, activeBuf]);
+    if (cur && !cur.loop && !session?.silent) cur.muted = muted;
+  }, [muted, activeBuf, session?.silent]);
 
   // ── Timed photo pop-ups: each group fires as the clip crosses its `at` ──
   // The group pops up all together around Rohey for ~5 seconds, then settles

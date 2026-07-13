@@ -66,6 +66,7 @@ export interface StepDirective {
   photoCount: number;
   photoGroups?: PhotoGroup[];
   mapIntro?: boolean;
+  silent?: boolean; // force-mute the clip (live gesture triggers — Fatou voices live)
   caption: string;
   token: number;
   paused: boolean;

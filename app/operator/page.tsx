@@ -171,6 +171,7 @@ export default function OperatorConsole() {
       idleClip: step.idleClip,
       photoFolder: null,
       photoCount: 0,
+      silent: true, // gesture clips only move the mouth — Fatou speaks live
       caption: caption ?? "",
       token: Date.now(),
       paused: false,
