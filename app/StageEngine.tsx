@@ -84,6 +84,9 @@ export default function StageEngine({
   const [mapIntroVisible, setMapIntroVisible] = useState(false);
   const mapIntroTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Corrected board question overlay for the first break (clip 11) ──
+  const [showQuestionOverlay, setShowQuestionOverlay] = useState(false);
+
   const [scrollOffset, setScrollOffset] = useState(0);
   const lastTimeRef = useRef<number | null>(null);
 
@@ -212,6 +215,8 @@ export default function StageEngine({
       }
 
       if (!changed) return;
+
+      setShowQuestionOverlay(false);
 
       // New scene: reset popups/triggers. The ring survives as long as the
       // incoming step still carries photos; otherwise it clears.
@@ -391,6 +396,9 @@ export default function StageEngine({
   const handleEnded = (which: "A" | "B") => () => {
     if (activeBufRef.current !== which) return; // stale buffer
     if (!session) return;
+    if (session.clip === 11) {
+      setShowQuestionOverlay(true);
+    }
     if (session.mode === "freeze") return; // hold the last frame
     if (session.mode === "idle") return; // looping nod never advances
     onContentEnded?.(lastToken.current);
@@ -424,6 +432,15 @@ export default function StageEngine({
       {/* Alternating scene buffers — consecutive scenes cross-fade. */}
       <video ref={bufARef} onEnded={handleEnded("A")} className={bufClass()} playsInline />
       <video ref={bufBRef} onEnded={handleEnded("B")} className={bufClass()} playsInline />
+
+      {/* ── Question overlay for clip 11 ── */}
+      {showQuestionOverlay && (
+        <img
+          src="/media/question.png"
+          alt="Classroom with Redesign Question"
+          className="absolute inset-0 w-full h-full object-cover z-25"
+        />
+      )}
 
       {/* ── Giga map intro: large in front of Rohey for the first 3 seconds,
              then it lives on the board behind her (baked into the video) ── */}

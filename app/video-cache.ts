@@ -25,8 +25,8 @@ const GCS_BASE = "https://storage.googleapis.com/virtual-teacher-project-501606.
 // (everything else stays cached). The query string is ignored by storage but
 // makes the browser Cache Storage key unique.
 const CLIP_VERSIONS: Record<number, number> = {
-  3: 2, // fresh classroom-360 edit
-  25: 2, // fixed clip 25
+  3: 3, // fresh classroom-360 edit
+  25: 3, // fixed clip 25
 };
 
 export function getGCSClipUrl(clipNum: number | string): string {
