@@ -396,7 +396,7 @@ export default function StageEngine({
   const handleEnded = (which: "A" | "B") => () => {
     if (activeBufRef.current !== which) return; // stale buffer
     if (!session) return;
-    if (session.clip === 11) {
+    if (session.clip === 11 || session.clip === 22) {
       setShowQuestionOverlay(true);
     }
     if (session.mode === "freeze") return; // hold the last frame
