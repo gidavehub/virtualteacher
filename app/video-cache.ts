@@ -20,8 +20,19 @@ export const PHOTO_SETS: { folder: string; count: number }[] = [
 
 const GCS_BASE = "https://storage.googleapis.com/virtual-teacher-project-501606.firebasestorage.app";
 
+// Per-clip cache-busting versions. After replacing a clip in storage, bump its
+// number here — its URL changes, so ONLY that clip re-downloads on each device
+// (everything else stays cached). The query string is ignored by storage but
+// makes the browser Cache Storage key unique.
+const CLIP_VERSIONS: Record<number, number> = {
+  3: 2, // fresh classroom-360 edit
+  25: 2, // fixed clip 25
+};
+
 export function getGCSClipUrl(clipNum: number | string): string {
-  return `${GCS_BASE}/rohey-clips-v2/${clipNum}.mp4`;
+  const n = Number(clipNum);
+  const v = CLIP_VERSIONS[n];
+  return `${GCS_BASE}/rohey-clips-v2/${clipNum}.mp4${v ? `?v=${v}` : ""}`;
 }
 
 export function getGCSPhotoUrl(folder: string, n: number): string {
@@ -51,13 +62,19 @@ export interface ProgressReport {
   totalBytes: number;
 }
 
-// Check if every show asset (clips + photos) is already cached
+// Check that every CURRENT show asset (by exact URL, incl. version query) is
+// cached. Verifying exact URLs — not just a count — means a bumped clip shows
+// as missing and gets topped up; the unchanged clips are already present so
+// only the changed one re-downloads.
 export async function checkCacheStatus(): Promise<boolean> {
   if (typeof window === "undefined" || !("caches" in window)) return false;
   try {
     const cache = await caches.open(CACHE_NAME);
-    const keys = await cache.keys();
-    return keys.length >= TOTAL_ASSETS;
+    for (const a of allAssets()) {
+      const match = await cache.match(a.url);
+      if (!match) return false;
+    }
+    return true;
   } catch (err) {
     console.error("Error checking cache status:", err);
     return false;

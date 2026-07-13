@@ -84,6 +84,10 @@ export function buildStepDirective(steps: Step[], i: number, token: number): Ste
     photoCount: step.photoSet?.count ?? 0,
     photoGroups: step.photoGroups ?? [],
     mapIntro: !!step.mapIntro,
+    // Always explicit: the sync layer MERGES partial updates, so a scene must
+    // actively write silent:false to clear a sticky silent:true left behind by
+    // a live gesture trigger — otherwise the whole rest of the show stays muted.
+    silent: false,
     caption: step.caption ?? "",
     paused: false,
   };
